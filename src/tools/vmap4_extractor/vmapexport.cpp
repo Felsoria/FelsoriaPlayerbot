@@ -17,6 +17,7 @@
  */
 
 #define _CRT_SECURE_NO_DEPRECATE
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <vector>
@@ -58,7 +59,7 @@ map_id * map_ids;
 uint16 *LiqType = 0;
 uint32 map_count;
 char output_path[128] = ".";
-char input_path[1024] = ".";
+static std::string rawInputPath = ".";
 bool preciseVectorData = false;
 
 // Constants
@@ -68,6 +69,13 @@ const char* szWorkDirWmo = "./Buildings";
 const char* szRawVMAPMagic = "VMAP043";
 
 // Local testing functions
+
+std::string GetRawInputPath(char const* fileName)
+{
+    std::string relative(fileName);
+    std::replace(relative.begin(), relative.end(), '\\', '/');
+    return (boost::filesystem::path(rawInputPath) / relative).string();
+}
 
 bool FileExists(const char* file)
 {
@@ -254,19 +262,9 @@ void ParsMapFiles()
     }
 }
 
-void getGamePath()
-{
-#ifdef _WIN32
-    strcpy(input_path, "Data\\");
-#else
-    strcpy(input_path,"Data/");
-#endif
-}
-
 bool processArgv(int argc, char ** argv, const char *versionString)
 {
     bool result = true;
-    bool hasInputPathParam = false;
     preciseVectorData = false;
 
     for (int i = 1; i < argc; ++i)
@@ -277,22 +275,14 @@ bool processArgv(int argc, char ** argv, const char *versionString)
         }
         else if (strcmp("-d", argv[i]) == 0)
         {
-            if ((i + 1) < argc)
-            {
-                hasInputPathParam = true;
-                strncpy(input_path, argv[i + 1], sizeof(input_path));
-                input_path[sizeof(input_path) - 1] = '\0';
-
-                if (input_path[strlen(input_path) - 1] != '\\' && input_path[strlen(input_path) - 1] != '/')
-                    strcat(input_path, "/");
-                ++i;
-            }
+            if (i + 1 < argc && argv[i + 1][0] != '\0')
+                rawInputPath = argv[++i];
             else
             {
                 result = false;
             }
         }
-        else if (strcmp("-?", argv[1]) == 0)
+        else if (strcmp("-?", argv[i]) == 0)
         {
             result = false;
         }
@@ -313,12 +303,9 @@ bool processArgv(int argc, char ** argv, const char *versionString)
         printf("%s [-?][-s][-l][-d <path>]\n", argv[0]);
         printf("   -s : (default) small size (data size optimization), ~500MB less vmap data.\n");
         printf("   -l : large size, ~500MB more vmap data. (might contain more details)\n");
-        printf("   -d <path>: Path to the vector data source folder.\n");
+        printf("   -d <path>: Unpacked client data directory (default: current directory).\n");
         printf("   -? : This message.\n");
     }
-
-    if (!hasInputPathParam)
-        getGamePath();
 
     return result;
 }
@@ -332,19 +319,26 @@ int main(int argc, char ** argv)
     if (!processArgv(argc, argv, versionString))
         return 1;
 
-    // some simple check if working dir is dirty
-    else
+    for (char const* file : { "DBFilesClient/Map.db2", "DBFilesClient/LiquidType.db2",
+        "DBFilesClient/GameObjectDisplayInfo.db2", "DBFilesClient/FileDataComplete.dbc" })
     {
-        std::string sdir = std::string(szWorkDirWmo) + "/dir";
-        std::string sdir_bin = std::string(szWorkDirWmo) + "/dir_bin";
-        struct stat status;
-        if (!stat(sdir.c_str(), &status) || !stat(sdir_bin.c_str(), &status))
+        std::string const path = GetRawInputPath(file);
+        if (!FileExists(path.c_str()))
         {
-            printf("Your output directory seems to be polluted, please use an empty directory!\n");
-            printf("<press return to exit>");
-            char garbage[2];
-            return scanf("%c", garbage);
+            fprintf(stderr, "Missing unpacked client file '%s'. Use -d to select the unpacked data directory.\n",
+                path.c_str());
+            return 1;
         }
+    }
+    if (!FileExists("wmo_list.txt"))
+    {
+        fprintf(stderr, "Missing wmo_list.txt. Run mapextractor first and use its output directory here.\n");
+        return 1;
+    }
+    if (FileExists("./Buildings/dir") || FileExists("./Buildings/dir_bin"))
+    {
+        fprintf(stderr, "Buildings already contains converted data. Use a clean extraction directory.\n");
+        return 1;
     }
 
     printf("Extract %s. Beginning work ....\n\n", versionString);
@@ -405,13 +399,13 @@ int main(int argc, char ** argv)
     }
 
     printf("\n");
+    delete[] LiqType;
     if (!success)
     {
-        printf("ERROR: Extract %s. Work NOT complete.\n   Precise vector data=%d.\nPress any key.\n", versionString, preciseVectorData);
-        getchar();
+        fprintf(stderr, "ERROR: Extract %s did not finish.\n", versionString);
+        return 1;
     }
 
-    printf("Extract %s. Work complete. No errors.\n", versionString);
-    delete[] LiqType;
+    printf("Extract %s. Work complete.\n", versionString);
     return 0;
 }

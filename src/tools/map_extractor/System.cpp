@@ -73,9 +73,8 @@ typedef struct
 
 map_id *map_ids;
 uint16 *LiqType;
-#define MAX_PATH_LENGTH 128
-char output_path[MAX_PATH_LENGTH];
-char input_path[MAX_PATH_LENGTH];
+std::string output_path = ".";
+std::string input_path = ".";
 
 // **************************************************
 // Extractor options
@@ -87,7 +86,7 @@ enum Extract
 };
 
 // Select data for extract
-int   CONF_extract = EXTRACT_MAP | EXTRACT_DBC;
+int   CONF_extract = EXTRACT_MAP;
 
 // This option allow limit minimum height to some value (Allow save some memory)
 bool  CONF_allow_height_limit = true;
@@ -136,24 +135,16 @@ char const* CascLocaleNames[CASC_LOCALES_COUNT] =
 void CreateDir(boost::filesystem::path const& path)
 {
     namespace fs = boost::filesystem;
-    if (fs::exists(path))
-        return;
-
-    if (!fs::create_directory(path))
-        throw new std::runtime_error("Unable to create directory" + path.string());
+    if (!fs::is_directory(path) && !fs::create_directories(path))
+        throw std::runtime_error("Unable to create directory " + path.string());
 }
 
 void Usage(char const* prg)
 {
-    printf(
-        "Usage:\n"\
-        "%s -[var] [value]\n"\
-        "-i set input path (max %d characters)\n"\
-        "-o set output path (max %d characters)\n"\
-        "-e extract only MAP(1)/DBC(2) - standard: both(3)\n"\
-        "-f height stored as int (less map size but lost some accuracy) 1 by default\n"\
-        "-l dbc locale\n"\
-        "Example: %s -f 0 -i \"c:\\games\\game\"\n", prg, MAX_PATH_LENGTH - 1, MAX_PATH_LENGTH - 1, prg);
+    printf("Usage: %s -e 1 -i <unpacked-client-data> -o <output-directory>\n"
+           "       %s -e 2 -i <Legion-client-root> -o <output-directory> -l <locale>\n"
+           "  -e 1 extracts maps from loose files (default); -e 2 extracts DB2 from CASC.\n"
+           "  -f <0|1> controls height storage; 1 is the default.\n", prg, prg);
     exit(1);
 }
 
@@ -173,20 +164,14 @@ void HandleArgs(int argc, char* arg[])
         switch (arg[c][1])
         {
             case 'i':
-                if (c + 1 < argc && strlen(arg[c + 1]) < MAX_PATH_LENGTH) // all ok
-                {
-                    strncpy(input_path, arg[c++ + 1], MAX_PATH_LENGTH);
-                    input_path[MAX_PATH_LENGTH - 1] = '\0';
-                }
+                if (c + 1 < argc && arg[c + 1][0] != '\0')
+                    input_path = arg[++c];
                 else
                     Usage(arg[0]);
                 break;
             case 'o':
-                if (c + 1 < argc && strlen(arg[c + 1]) < MAX_PATH_LENGTH) // all ok
-                {
-                    strncpy(output_path, arg[c++ + 1], MAX_PATH_LENGTH);
-                    output_path[MAX_PATH_LENGTH - 1] = '\0';
-                }
+                if (c + 1 < argc && arg[c + 1][0] != '\0')
+                    output_path = arg[++c];
                 else
                     Usage(arg[0]);
                 break;
@@ -276,11 +261,11 @@ void HandleArgs(int argc, char* arg[])
     // return build;
 // }
 
-uint32 LoadMapDB2Data()
+uint32 LoadMapDB2Data(std::string const& fileName)
 {
     printf("Read Map.db2 file...\n");
 
-    DBCFile dbc("DBFilesClient\\Map.db2", "nsiifffsssttttttbbbbb");
+    DBCFile dbc(fileName.c_str(), "nsiifffsssttttttbbbbb");
     if (!dbc.open())
     {
         printf("Fatal error: Invalid Map.db2 file format!\n");
@@ -309,10 +294,10 @@ uint32 LoadMapDB2Data()
     return mapCount;
 }
 
-void LoadLiquidTypeDB2Data()
+void LoadLiquidTypeDB2Data(std::string const& fileName)
 {
     printf("Read LiquidType.db2 file...");
-    DBCFile dbc("DBFilesClient\\LiquidType.db2", "nsifffffssssssiiffffffffffffffffffiiiittbbbbbbbbbbi");
+    DBCFile dbc(fileName.c_str(), "nsifffffssssssiiffffffffffffffffffiiiittbbbbbbbbbbi");
     if (!dbc.open())
     {
         printf("Fatal error: Invalid LiquidType.db2 file format!\n");
@@ -990,8 +975,7 @@ bool ConvertADT(std::string const& inputPath, std::string const& outputPath, int
         outFile.write(reinterpret_cast<const char*>(holes), map.holesSize);
 
     outFile.close();
-
-    return true;
+    return !outFile.fail();
 }
 
 void ExtractWmos(ChunkedFile& file, std::set<std::string>& wmoList)
@@ -1011,20 +995,29 @@ void ExtractWmos(ChunkedFile& file, std::set<std::string>& wmoList)
     }
 }
 
-void ExtractMaps(uint32 build)
+bool ExtractMaps(uint32 build)
 {
     std::string storagePath;
     std::string outputFileName;
 
+    namespace fs = boost::filesystem;
+    fs::path const raw(input_path);
+    fs::path const maps = raw / "World" / "Maps";
+    fs::path const db2 = raw / "DBFilesClient";
+    if (!fs::is_directory(maps) || !fs::is_regular_file(db2 / "Map.db2") ||
+        !fs::is_regular_file(db2 / "LiquidType.db2"))
+    {
+        fprintf(stderr, "Map extraction requires unpacked World/Maps, DBFilesClient/Map.db2 and "
+            "DBFilesClient/LiquidType.db2 under '%s'. Use -i to select that directory.\n", input_path.c_str());
+        return false;
+    }
+
     printf("Extracting maps...\n");
-
-    uint32 map_count = LoadMapDB2Data();
-
-    LoadLiquidTypeDB2Data();
-
-    std::string path = output_path;
-    path += "/maps/";
-    CreateDir(path);
+    uint32 map_count = LoadMapDB2Data((db2 / "Map.db2").string());
+    LoadLiquidTypeDB2Data((db2 / "LiquidType.db2").string());
+    CreateDir(fs::path(output_path) / "maps");
+    uint32 writtenMaps = 0;
+    uint32 failedMaps = 0;
 
     std::set<std::string> wmoList;
 
@@ -1033,7 +1026,8 @@ void ExtractMaps(uint32 build)
     {
         printf("Extract %s (%d/%u)                  \n", map_ids[z].name, z + 1, map_count);
         // Loadup map grid data
-        storagePath = Trinity::StringFormat("World\\Maps\\%s\\%s.wdt", map_ids[z].name, map_ids[z].name);
+        fs::path const mapDirectory = maps / map_ids[z].name;
+        storagePath = (mapDirectory / (std::string(map_ids[z].name) + ".wdt")).string();
         ChunkedFile wdt;
         if (!wdt.loadFile(storagePath, false))
             continue;
@@ -1041,6 +1035,12 @@ void ExtractMaps(uint32 build)
         ExtractWmos(wdt, wmoList);
 
         FileChunk* chunk = wdt.GetChunk("MAIN");
+        if (!chunk)
+        {
+            fprintf(stderr, "Missing MAIN chunk in '%s'.\n", storagePath.c_str());
+            ++failedMaps;
+            continue;
+        }
         for (uint32 y = 0; y < WDT_MAP_SIZE; ++y)
         {
             for (uint32 x = 0; x < WDT_MAP_SIZE; ++x)
@@ -1048,11 +1048,15 @@ void ExtractMaps(uint32 build)
                 if (!(chunk->As<wdt_MAIN>()->adt_list[y][x].flag & 0x1))
                     continue;
 
-                storagePath = Trinity::StringFormat("World\\Maps\\%s\\%s_%u_%u.adt", map_ids[z].name, map_ids[z].name, x, y);
-                outputFileName = Trinity::StringFormat("%s/maps/%04u_%02u_%02u.map", output_path, map_ids[z].id, y, x);
-                ConvertADT(storagePath, outputFileName, y, x, build);
+                std::string const tile = Trinity::StringFormat("%s_%u_%u", map_ids[z].name, x, y);
+                storagePath = (mapDirectory / (tile + ".adt")).string();
+                outputFileName = Trinity::StringFormat("%s/maps/%04u_%02u_%02u.map", output_path.c_str(), map_ids[z].id, y, x);
+                if (ConvertADT(storagePath, outputFileName, y, x, build))
+                    ++writtenMaps;
+                else
+                    ++failedMaps;
 
-                storagePath = Trinity::StringFormat("World\\Maps\\%s\\%s_%u_%u_obj0.adt", map_ids[z].name, map_ids[z].name, x, y);
+                storagePath = (mapDirectory / (tile + "_obj0.adt")).string();
                 ChunkedFile adtObj;
                 if (adtObj.loadFile(storagePath, false))
                     ExtractWmos(adtObj, wmoList);
@@ -1063,19 +1067,27 @@ void ExtractMaps(uint32 build)
         }
     }
 
-    if (!wmoList.empty())
-    {
-        if (FILE* wmoListFile = fopen("wmo_list.txt", "w"))
-        {
-            for (std::string const& wmo : wmoList)
-                fprintf(wmoListFile, "%s\n", wmo.c_str());
+    delete[] map_ids;
+    delete[] LiqType;
 
-            fclose(wmoListFile);
-        }
+    printf("\nMap files written: %u; failures: %u\n", writtenMaps, failedMaps);
+    if (writtenMaps == 0 || failedMaps != 0)
+    {
+        fprintf(stderr, "Map extraction incomplete. Check the unpacked data and the preceding errors.\n");
+        return false;
     }
 
-    printf("\n");
-    delete[] map_ids;
+    std::string const wmoListPath = (fs::path(output_path) / "wmo_list.txt").string();
+    std::ofstream wmoListFile(wmoListPath);
+    for (std::string const& wmo : wmoList)
+        wmoListFile << wmo << '\n';
+    wmoListFile.close();
+    if (!wmoListFile)
+    {
+        fprintf(stderr, "Could not write '%s'.\n", wmoListPath.c_str());
+        return false;
+    }
+    return true;
 }
 
 // bool ExtractFile(HANDLE fileInArchive, std::string filename)
@@ -1160,15 +1172,14 @@ int main(int argc, char * arg[])
         catch (...) { printf("DB2 extraction failed with an unknown exception.\n"); return 8; }
     }
 
-    boost::filesystem::path current(boost::filesystem::current_path());
-    strcpy(input_path, current.string().c_str());
-    strcpy(output_path, current.string().c_str());
-
     HandleArgs(argc, arg);
-
-    if (CONF_extract & EXTRACT_MAP)
-        ExtractMaps(20365);
-        // ExtractMaps(ReadBuild(LOCALE_enUS));
-
-    return 0;
+    try
+    {
+        return ExtractMaps(26972) ? 0 : 1;
+    }
+    catch (std::exception const& error)
+    {
+        fprintf(stderr, "Map extraction failed: %s\n", error.what());
+        return 1;
+    }
 }

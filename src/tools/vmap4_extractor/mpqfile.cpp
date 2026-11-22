@@ -1,4 +1,5 @@
 #include "mpqfile.h"
+#include "vmapexport.h"
 #include <deque>
 #include <cstdio>
 
@@ -8,7 +9,8 @@ MPQFile::MPQFile(const char* filename) :
     pointer(0),
     size(0)
 {
-    FILE* f = fopen(filename, "rb");
+    std::string const path = GetRawInputPath(filename);
+    FILE* f = fopen(path.c_str(), "rb");
     if (!f)
     {
         // fprintf(stderr, "Can't open %s\n", filename);
