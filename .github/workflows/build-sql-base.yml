@@ -7,6 +7,8 @@ on:
       - 'sql/updates/**/*.sql'
       - '.github/scripts/build-sql-base.py'
       - '.github/workflows/build-sql-base.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   release:
     types: [published]
@@ -17,6 +19,7 @@ permissions:
 jobs:
   build:
     if: >-
+      github.event_name == 'pull_request' ||
       (github.event_name != 'release' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'release' && github.event.release.tag_name != 'database-v2-20261121')
     runs-on: ubuntu-24.04
@@ -32,6 +35,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify the source revision is on main
+        if: github.event_name != 'pull_request'
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Download the pinned baseline
