@@ -46,6 +46,16 @@ MaxPingTime = 30
 BattlenetPort = 1119
 
 #
+#    TLS.CertificateFile and TLS.PrivateKeyFile
+#        Description: PEM certificate chain and matching private key for the Battle.net and REST listeners.
+#                     Use a chain trusted by the Legion client. Relative paths are resolved from
+#                     the server's working directory.
+#        Default:     "bnetserver.cert.pem" and "bnetserver.key.pem"
+
+TLS.CertificateFile = "bnetserver.cert.pem"
+TLS.PrivateKeyFile = "bnetserver.key.pem"
+
+#
 #    LoginREST.Port
 #        Description: TCP port to reach the REST login method.
 #        Default:     8081

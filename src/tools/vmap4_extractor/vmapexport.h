@@ -31,6 +31,7 @@ enum ModelFlags
 extern const char * szWorkDirWmo;
 extern const char * szRawVMAPMagic;                         // vmap magic string for extracted raw vmap data
 
+std::string GetRawInputPath(char const* fileName);
 bool FileExists(const char * file);
 void strToLower(char* str);
 

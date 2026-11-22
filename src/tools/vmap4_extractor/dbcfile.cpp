@@ -19,6 +19,7 @@
 #define _CRT_SECURE_NO_DEPRECATE
 
 #include "dbcfile.h"
+#include "vmapexport.h"
 
 DBCFile::DBCFile(char const* file, char const* fmt, bool isdbc /*= false*/)
 {
@@ -52,7 +53,8 @@ bool DBCFile::open()
         recordTable = nullptr;
     }
 
-    FILE* f = fopen(_file, "rb");
+    std::string const path = GetRawInputPath(_file);
+    FILE* f = fopen(path.c_str(), "rb");
     if (!f)
         return false;
 

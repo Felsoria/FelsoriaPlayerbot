@@ -16,24 +16,51 @@
  */
 
 #include "SslContext.h"
+#include "Config.h"
 #include "Log.h"
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 bool Battlenet::SslContext::Initialize()
 {
-    boost::system::error_code err;
+    boost::asio::ssl::context& context = instance();
+    boost::system::error_code error;
+    context.set_options(boost::asio::ssl::context::no_sslv3, error);
+    if (error)
+    {
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Could not configure Battle.net TLS: %s", error.message().c_str());
+        return false;
+    }
 
-#define LOAD_CHECK(fn) do { fn; \
-    if (err) \
-    { \
-        TC_LOG_ERROR(LOG_FILTER_GENERAL, #fn " failed: %s", err.message().c_str()); \
-        return false; \
-    } } while (0)
+    std::string const certificate = sConfigMgr->GetStringDefault("TLS.CertificateFile", "bnetserver.cert.pem");
+    std::string const privateKey = sConfigMgr->GetStringDefault("TLS.PrivateKeyFile", "bnetserver.key.pem");
+    context.use_certificate_chain_file(certificate, error);
+    if (error)
+    {
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Could not load Battle.net TLS certificate '%s' (TLS.CertificateFile): %s",
+            certificate.c_str(), error.message().c_str());
+        return false;
+    }
 
-    LOAD_CHECK(instance().set_options(boost::asio::ssl::context::no_sslv3, err));
-    LOAD_CHECK(instance().use_certificate_chain_file("bnetserver.cert.pem", err));
-    LOAD_CHECK(instance().use_private_key_file("bnetserver.key.pem", boost::asio::ssl::context::pem, err));
+    context.use_private_key_file(privateKey, boost::asio::ssl::context::pem, error);
+    if (error)
+    {
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Could not load Battle.net TLS private key '%s' (TLS.PrivateKeyFile): %s",
+            privateKey.c_str(), error.message().c_str());
+        return false;
+    }
 
-#undef LOAD_CHECK
+    if (SSL_CTX_check_private_key(context.native_handle()) != 1)
+    {
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Battle.net TLS certificate '%s' and private key '%s' do not match.",
+            certificate.c_str(), privateKey.c_str());
+        return false;
+    }
+
+    TC_LOG_INFO(LOG_FILTER_BATTLENET, "Loaded Battle.net TLS certificate '%s'. Use a certificate chain trusted by your Legion client.",
+        certificate.c_str());
+    if (X509_self_signed(SSL_CTX_get0_certificate(context.native_handle()), 1) == 1)
+        TC_LOG_WARN(LOG_FILTER_BATTLENET, "Battle.net TLS uses a self-signed certificate. The Legion client must explicitly trust this certificate.");
 
     return true;
 }

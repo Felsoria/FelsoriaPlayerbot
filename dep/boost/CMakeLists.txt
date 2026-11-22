@@ -1,25 +1,26 @@
 ﻿if(WIN32)
- set(BOOST_DEBUG ON)
-  if(DEFINED ENV{BOOST_ROOT})
-    set(BOOST_ROOT $ENV{BOOST_ROOT})
+  if(NOT BOOST_ROOT AND DEFINED ENV{BOOST_ROOT})
+    set(BOOST_ROOT "$ENV{BOOST_ROOT}")
+  endif()
+  if(NOT BOOST_LIBRARYDIR AND DEFINED ENV{BOOST_LIBRARYDIR})
+    set(BOOST_LIBRARYDIR "$ENV{BOOST_LIBRARYDIR}")
+  endif()
+
+  if(BOOST_ROOT AND NOT BOOST_LIBRARYDIR)
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.0)
-      set(BOOST_LIBRARYDIR ${BOOST_ROOT}/lib${PLATFORM}-msvc-12.0)
+      set(BOOST_LIBRARYDIR "${BOOST_ROOT}/lib${PLATFORM}-msvc-12.0")
     elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.10)
-      set(BOOST_LIBRARYDIR ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.0)
+      set(BOOST_LIBRARYDIR "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.0")
+    elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20)
+      set(BOOST_LIBRARYDIR
+        "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.1"
+        "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.0")
     else()
-		if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20)
-			list(APPEND BOOST_LIBRARYDIR
-			  ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.1
-			  ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.0 )
-		else()
-			list(APPEND BOOST_LIBRARYDIR
-			  ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.3
-                          ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.2
-                          ${BOOST_ROOT}/lib${PLATFORM}-msvc-14.1 )
-		endif()
+      set(BOOST_LIBRARYDIR
+        "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.3"
+        "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.2"
+        "${BOOST_ROOT}/lib${PLATFORM}-msvc-14.1")
     endif()
-  else()
-    message(FATAL_ERROR "No BOOST_ROOT environment variable could be found! Please make sure it is set and the points to your Boost installation.")
   endif()
 
   set(Boost_USE_STATIC_LIBS        ON)
