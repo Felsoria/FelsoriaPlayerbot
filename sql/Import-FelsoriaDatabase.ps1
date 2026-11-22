@@ -41,9 +41,8 @@ try {
 
     $expectedDirectory = $data.FullName.Replace('\', '/').TrimEnd('/')
     $directoryHex = [BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes($expectedDirectory)).Replace('-', '')
-    $script = Join-Path $temporary 'install.sql'
 
-    # A failed guard aborts the noninteractive client before any CREATE or SOURCE.
+    # A failed guard aborts the noninteractive client before any CREATE or dump statement.
     # The connection keeps the advisory lock until the client exits.
     $commands = @"
 SELECT IF(GET_LOCK('felsoria.fresh_database_import', 0) = 1,
@@ -64,26 +63,70 @@ PREPARE import_guard FROM @guard;
 EXECUTE import_guard;
 DEALLOCATE PREPARE import_guard;
 SELECT @@datadir AS verified_datadir, @@port AS verified_port;
-"@ -split '\r?\n'
+"@
     foreach ($schema in $schemas) {
-        $commands += "CREATE DATABASE $schema CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        $commands += " CREATE DATABASE $schema CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" + [Environment]::NewLine
     }
-    foreach ($schema in $schemas) {
-        $dump = (Join-Path $temporary "$schema.sql").Replace('\', '/')
-        $commands += "USE $schema;", "SELECT 'Import: $schema.sql' AS progress;", "source $dump"
-    }
-    [IO.File]::WriteAllLines($script, [string[]]$commands, (New-Object Text.UTF8Encoding($false)))
 
-    $credentialOption = if ($SkipPassword) { '--skip-password' } else { '--password' }
-    $sqlPath = $script.Replace('\', '/')
-    $clientOptions = @(
-        '--no-defaults', '--protocol=TCP', '--host=127.0.0.1', "--port=$Port", "--user=$User",
-        $credentialOption, '--batch', '--unbuffered', '--skip-reconnect',
-        '--default-character-set=utf8mb4', "--execute=source $sqlPath"
-    )
-    & $mysql.FullName @clientOptions
-    if ($LASTEXITCODE -ne 0) {
-        throw 'The import stopped. See the MySQL error above. A partial import requires a fresh test instance before retrying.'
+    # Feed the entire import to the client as batch input. Errors in SOURCE files
+    # can be ignored by some mysql-compatible clients even in batch mode.
+    $userArg = ($User -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1'
+    $client = New-Object Diagnostics.ProcessStartInfo
+    $client.FileName = $mysql.FullName
+    $client.Arguments = '--no-defaults --protocol=TCP --host=127.0.0.1 --port={0} --user="{1}" --batch --binary-mode --unbuffered --skip-reconnect --default-character-set=utf8mb4' -f $Port, $userArg
+    $client.UseShellExecute = $false
+    $client.RedirectStandardInput = $true
+    $client.EnvironmentVariables.Remove('MYSQL_PWD')
+    if ($SkipPassword) {
+        $client.Arguments += ' --skip-password'
+    } else {
+        $password = Read-Host -Prompt "MySQL password for $User at 127.0.0.1 port $Port" -AsSecureString
+        $encodedPassword = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+        try {
+            $client.EnvironmentVariables['MYSQL_PWD'] = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($encodedPassword)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($encodedPassword)
+            $password.Dispose()
+        }
+    }
+
+    $process = $null
+    try {
+        try {
+            $process = [Diagnostics.Process]::Start($client)
+        } finally {
+            $client.EnvironmentVariables.Remove('MYSQL_PWD')
+        }
+        $stdin = $process.StandardInput.BaseStream
+        $writeError = $null
+        try {
+            $bytes = [Text.Encoding]::UTF8.GetBytes($commands)
+            $stdin.Write($bytes, 0, $bytes.Length)
+            foreach ($schema in $schemas) {
+                $header = [Text.Encoding]::UTF8.GetBytes("USE $schema; SELECT 'Import: $schema.sql' AS progress;" + [Environment]::NewLine)
+                $stdin.Write($header, 0, $header.Length)
+                $dumpStream = [IO.File]::OpenRead((Join-Path $temporary "$schema.sql"))
+                try {
+                    $dumpStream.CopyTo($stdin)
+                    $stdin.WriteByte(10)
+                } finally {
+                    $dumpStream.Dispose()
+                }
+            }
+        } catch [IO.IOException] {
+            $writeError = $_
+        } finally {
+            $stdin.Dispose()
+        }
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) {
+            throw 'The import stopped. See the MySQL error above. A partial import requires a fresh test instance before retrying.'
+        }
+        if ($writeError) {
+            throw $writeError
+        }
+    } finally {
+        if ($process) { $process.Dispose() }
     }
     Write-Host 'Imported auth, characters, world, and hotfixes.'
 } finally {
