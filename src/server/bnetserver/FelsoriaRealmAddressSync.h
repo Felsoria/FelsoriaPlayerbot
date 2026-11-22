@@ -62,7 +62,6 @@ static bool FelsoriaSyncRealmAddress()
     std::string scope = allRealms ? "1=1" : "r.`id` = " + std::to_string(realmId);
     if (!allRealms && includeAliases)
     {
-        scope += " OR r.`id` IN (901,902,903,904,905,906,907)";
         if (sConfigMgr->GetBoolDefault("Felsoria.VirtualRealms.EULegion.Enable", false))
         {
             std::string const table = FelsoriaAddressCatalogTable;
@@ -76,6 +75,8 @@ static bool FelsoriaSyncRealmAddress()
             scope += " OR (r.`id` IN "
                 "(SELECT `realm_id` FROM `" + table + "` WHERE `enabled` = 1))";
         }
+        else
+            scope += " OR r.`id` IN (901,902,903,904,905,906,907)";
     }
 
     std::string const columns = "SELECT r.`id`, COALESCE(r.`address`,''), COALESCE(r.`localAddress`,'') FROM `realmlist` r WHERE ";

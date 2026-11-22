@@ -291,11 +291,12 @@ Loggers=GENERAL NETWORKIO SQL SQL_DRIVER SQL_DEV REALMLIST BATTLENET BNET_SESSIO
 #
 ###################################################################################################
 
-# Felsoria: copy LoginREST addresses to all realmlist rows at bnet startup.
+# Synchronize the primary realm and Felsoria's virtual aliases with the REST addresses.
+# Set AllRealms to 1 only if every row uses this worldserver.
 Felsoria.RealmAddressSync.Enable = 1
 Felsoria.RealmAddressSync.RealmID = 1
 Felsoria.RealmAddressSync.IncludeVirtualRealms = 1
-Felsoria.RealmAddressSync.AllRealms = 1
+Felsoria.RealmAddressSync.AllRealms = 0
 
 # Show the bundled EU Legion aliases for the local worldserver (RealmID 1).
 Felsoria.VirtualRealms.Enable = 1

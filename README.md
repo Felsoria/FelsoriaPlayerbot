@@ -69,30 +69,17 @@ Find the executables and server configuration templates in `build/bin/RelWithDeb
 
 Use the generated SQL ZIP attached to your release. For a source install from GitHub Actions, download the `felsoria-database` artifact from the successful build for that revision and unpack the outer ZIP. The generated inner ZIP contains four SQL dumps and `database-manifest.json`. Check `source_commit` and `applied_migrations` in the manifest. For a release ZIP or an Actions artifact, use the SHA-256 recorded by the corresponding build. [Releases](https://github.com/Felsoria/felsoria-source/releases) · [SQL builds](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml)
 
-Use a dedicated local MySQL instance with a new data directory. MySQL 5.7.44 is the verified import target. In your MySQL session, check that the directory and port belong to your new instance before creating any databases. [MySQL Community Server archives](https://downloads.mysql.com/archives/community/)
+Use a dedicated loopback MySQL 5.7.44 instance with a new data directory. Run this from the source checkout in PowerShell, replacing the paths, port and SHA-256 with those of your test installation and the generated inner ZIP. The command reads the source commit from the checkout and prompts for the MySQL password. [MySQL Community Server archives](https://downloads.mysql.com/archives/community/)
 
-```sql
-SELECT @@datadir, @@port, @@version;
-SHOW DATABASES;
+```powershell
+.\sql\Import-FelsoriaDatabase.ps1 `
+  -MySqlExecutable 'D:\Felsoria-Local\mysql\bin\mysql.exe' `
+  -Port 33317 -DataDirectory 'D:\Felsoria-Local\mysql-data' `
+  -SqlZip 'D:\Felsoria-Local\downloads\Felsoria-Developer-V2-SQL-<commit>.zip' `
+  -Sha256 '<SHA-256 from the SQL build or release>' -SourceCommit (git rev-parse HEAD)
 ```
 
-Continue once `@@datadir` and `@@port` identify your new instance and `SHOW DATABASES` confirms the four target names are absent. Create the empty databases, then import each dump into the database with the same name. In the MySQL CLI, adjust the example paths to your extracted SQL directory. Stop if any command reports an error.
-
-```sql
-CREATE DATABASE auth CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE characters CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE world CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE DATABASE hotfixes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-USE auth;
-source D:/Felsoria-Local/SQL/auth.sql
-USE characters;
-source D:/Felsoria-Local/SQL/characters.sql
-USE world;
-source D:/Felsoria-Local/SQL/world.sql
-USE hotfixes;
-source D:/Felsoria-Local/SQL/hotfixes.sql
-```
+The importer checks the ZIP, source commit, server version, port and data directory. It requires all four database names to be unused and stops on the first MySQL error. If an import stops after creating schemas, use a fresh instance to retry. [Updating an existing database](sql/updates/README.md#updating-an-existing-installation)
 
 The generated package seeds realm ID `1` at `127.0.0.1:8085` and client build `26972`. Player accounts, characters, and the dynamic-bot ownership table start empty. Existing installations apply the migrations missing from their installed revision. [Updating an existing database](sql/updates/README.md#updating-an-existing-installation)
 
@@ -119,18 +106,20 @@ Copy `bnetserver.conf.dist` to `bnetserver.conf` and `worldserver.conf.dist` to 
 | `worldserver.conf` | `WorldDatabaseInfo` | `world` |
 | `worldserver.conf` | `HotfixDatabaseInfo` | `hotfixes` |
 
-For a local installation, set `BindIP = "127.0.0.1"` in both files and keep `LoginREST.ExternalAddress` and `LoginREST.LocalAddress` at `127.0.0.1`. In `worldserver.conf`, keep `Game.Build.Version = 26972` and match `RealmID = 1` and `WorldServerPort = 8085` to the imported `auth.realmlist` row. The virtual realm aliases use the same worldserver endpoint.
+For a local installation, set `BindIP = "127.0.0.1"` in both files and keep `LoginREST.ExternalAddress` and `LoginREST.LocalAddress` at `127.0.0.1`. In `worldserver.conf`, keep `Game.Build.Version = 26972` and match `RealmID = 1` and `WorldServerPort = 8085` to the imported `auth.realmlist` row. The virtual realm aliases use the same worldserver endpoint. Automatic address synchronization covers the physical realm and the configured aliases by default. Installations that deliberately route every realm through that endpoint can set `Felsoria.RealmAddressSync.AllRealms = 1`.
 
 The templates enable the EU Legion virtual realm list and dynamic PlayerBots. The SQL package seeds 267 playable aliases and one tournament entry for the list. The physical realm stays at ID `1`. Bots are created on demand. The default limits are 50 open-world bots and 100 for instances and battlegrounds, with a party reserve of 10. The package includes 425 unassigned Cyrillic bot names for Russian realms.
 
-Existing installations keep their `.conf` files. Apply the missing migrations and copy the virtual realm and PlayerBot settings you want to use from the new templates. Use the same MySQL instance for AUTH and characters. The AUTH database user needs access to the characters table for character-to-realm mapping.
+Existing installations keep their `.conf` files. Apply the missing migrations and copy the virtual realm and PlayerBot settings you want to use from the new templates. Use the same MySQL instance for AUTH and characters. The AUTH database user needs access to the characters table for character-to-realm mapping. If either server reports `FELSORIA_REALM_DATA_INCOMPATIBLE`, update AUTH with the migrations for this source revision or use a matching generated ZIP on a fresh installation.
 
 For Battle.net and its HTTPS login form, provide a PEM certificate chain trusted by your Legion client and its matching private key. The repository ships a public TrinityCore certificate chain. Supply a compatible pair for your client and keep the private key local. A self-signed certificate requires explicit trust in the client. Relative paths resolve from the server's working directory.
 
 ```ini
 TLS.CertificateFile = "bnetserver.cert.pem"
-TLS.PrivateKeyFile = "bnetserver.key.pem"
+TLS.PrivateKeyFile = "D:/Felsoria-Local/tls/bnetserver.key.pem"
 ```
+
+Keep the private key in a local directory outside the source and build trees. Set the configuration path to that file. CMake can copy an optional public certificate from the source tree.
 
 Start `bnetserver.exe` and then `worldserver.exe` from their working directory. When `worldserver` reports it is ready, confirm the configured ports are listening on the correct processes. These are the default ports for the local setup.
 
@@ -155,7 +144,7 @@ If the client immediately disconnects with `BLZ51901023`, check the client login
 
 ## Contributing
 
-Open a pull request with the behavior you changed, how you tested it, and any SQL or configuration changes needed to use it. Put database changes in versioned SQL migration files. GitHub Actions replays the migrations against a fresh database for pull requests targeting `main`. [Pull requests](https://github.com/Felsoria/felsoria-source/pulls) · [SQL migrations](sql/updates/README.md)
+Open a pull request with the behavior you changed, how you tested it, and any SQL or configuration changes needed to use it. Put database changes in versioned SQL migration files. For pull requests targeting `main` and updates to `main`, GitHub Actions builds the matching SQL ZIP and checks the Windows build, extractor output and Battle.net startup. [Pull requests](https://github.com/Felsoria/felsoria-source/pulls) · [SQL migrations](sql/updates/README.md)
 
 For a bug report, include the source commit, client build, database snapshot, reproduction steps, and a short log excerpt. For gameplay issues, include the quest ID or instance name, difficulty, and bot class or role where relevant. [Report a bug](https://github.com/Felsoria/felsoria-source/issues)
 

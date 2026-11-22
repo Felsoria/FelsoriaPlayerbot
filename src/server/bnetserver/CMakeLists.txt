@@ -64,11 +64,8 @@ set_target_properties(bnetserver
       FOLDER
         "server")
 
+# Only the public chain belongs in build and install outputs.
 set(BNETSERVER_CERTIFICATE "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.cert.pem")
-set(BNETSERVER_PRIVATE_KEY "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.key.pem")
-if (EXISTS "${BNETSERVER_CERTIFICATE}" AND EXISTS "${BNETSERVER_PRIVATE_KEY}")
-  set(BNETSERVER_TLS_FILES "${BNETSERVER_CERTIFICATE}" "${BNETSERVER_PRIVATE_KEY}")
-endif()
 
 if (WIN32)
   add_custom_command(TARGET bnetserver POST_BUILD
@@ -76,10 +73,10 @@ if (WIN32)
             "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.conf.dist"
             "$<TARGET_FILE_DIR:bnetserver>"
     VERBATIM)
-  if (BNETSERVER_TLS_FILES)
+  if (EXISTS "${BNETSERVER_CERTIFICATE}")
     add_custom_command(TARGET bnetserver POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              ${BNETSERVER_TLS_FILES} "$<TARGET_FILE_DIR:bnetserver>"
+              "${BNETSERVER_CERTIFICATE}" "$<TARGET_FILE_DIR:bnetserver>"
       VERBATIM)
   endif()
 endif()
@@ -87,14 +84,14 @@ endif()
 if (UNIX)
   install(TARGETS bnetserver DESTINATION bin)
   install(FILES bnetserver.conf.dist DESTINATION ${CONF_DIR})
-  if (BNETSERVER_TLS_FILES)
-    install(FILES ${BNETSERVER_TLS_FILES} DESTINATION bin)
+  if (EXISTS "${BNETSERVER_CERTIFICATE}")
+    install(FILES "${BNETSERVER_CERTIFICATE}" DESTINATION bin)
   endif()
 elseif (WIN32)
   install(TARGETS bnetserver DESTINATION "${CMAKE_INSTALL_PREFIX}")
   install(FILES bnetserver.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  if (BNETSERVER_TLS_FILES)
-    install(FILES ${BNETSERVER_TLS_FILES} DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  if (EXISTS "${BNETSERVER_CERTIFICATE}")
+    install(FILES "${BNETSERVER_CERTIFICATE}" DESTINATION "${CMAKE_INSTALL_PREFIX}")
   endif()
 endif()
 

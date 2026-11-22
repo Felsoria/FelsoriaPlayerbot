@@ -32,6 +32,7 @@ class WDTFile
 private:
     MPQFile WDT;
     std::string filename;
+    bool _hasTerrainTile[64][64] = {};
 public:
     WDTFile(char* file_name, char* file_name1);
     ~WDTFile(void);

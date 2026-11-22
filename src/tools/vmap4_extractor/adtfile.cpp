@@ -92,16 +92,16 @@ bool ADTFile::init(uint32 map_num, uint32 tileX, uint32 tileY)
     FILE *dirfile;
     dirfile = fopen(dirname.c_str(), "ab");
     if (!dirfile)
-    {
-        // printf("Can't open dirfile!'%s'\n", dirname.c_str());
         return false;
-    }
 
     while (!ADT.isEof())
     {
         char fourcc[5];
-        ADT.read(&fourcc,4);
-        ADT.read(&size, 4);
+        if (ADT.read(fourcc, 4) != 4 || ADT.read(&size, 4) != 4 || size > ADT.getSize() - ADT.getPos())
+        {
+            fclose(dirfile);
+            return false;
+        }
         flipcc(fourcc);
         fourcc[4] = 0;
 
@@ -194,8 +194,8 @@ bool ADTFile::init(uint32 map_num, uint32 tileX, uint32 tileY)
     }
 
     ADT.close();
-    fclose(dirfile);
-    return true;
+    bool const complete = !ferror(dirfile);
+    return fclose(dirfile) == 0 && complete;
 }
 
 ADTFile::~ADTFile()

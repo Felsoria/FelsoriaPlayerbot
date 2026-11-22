@@ -1,0 +1,268 @@
+name: Verify Felsoria on Windows
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  vs2022:
+    runs-on: windows-2022
+    timeout-minutes: 85
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare x64 Boost 1.78.0
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'boost_1_78_0.7z'
+          $boost = Join-Path $env:RUNNER_TEMP 'boost_1_78_0'
+          curl.exe --fail --location --retry 3 --output $archive https://archives.boost.io/release/1.78.0/source/boost_1_78_0.7z
+          if ($LASTEXITCODE -ne 0) { throw 'Boost download failed.' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+          if ($hash -ne '090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c') { throw 'Boost checksum mismatch.' }
+
+          7z.exe x $archive "-o$env:RUNNER_TEMP" -y -bso0
+          if ($LASTEXITCODE -ne 0) { throw 'Boost extraction failed.' }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2022 with MSVC was not found.' }
+          & (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+
+          Push-Location $boost
+          try {
+            cmd.exe /d /c bootstrap.bat
+            if ($LASTEXITCODE -ne 0) { throw 'Boost bootstrap failed.' }
+            .\b2.exe -j2 toolset=msvc-14.3 address-model=64 link=static runtime-link=shared threading=multi variant=release --layout=versioned --with-system --with-filesystem --with-thread --with-program_options --with-iostreams --with-regex stage
+            if ($LASTEXITCODE -ne 0) { throw 'Boost compilation failed.' }
+            Move-Item -LiteralPath '.\stage\lib' -Destination (Join-Path $env:RUNNER_TEMP 'Boost libraries')
+          } finally {
+            Pop-Location
+          }
+          "FELSORIA_CI_BOOST=$boost" >> $env:GITHUB_ENV
+
+      - name: Configure the clean source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $openssl = Join-Path $env:ProgramFiles 'OpenSSL'
+          $mysql = Split-Path (Split-Path (Get-Command mysql.exe -ErrorAction Stop).Source)
+          $mysqlInclude = Join-Path $mysql 'include'
+          $mysqlLibrary = Join-Path $mysql 'lib\libmysql.lib'
+          if (!(Test-Path (Join-Path $mysqlInclude 'mysql.h')) -or !(Test-Path $mysqlLibrary)) {
+            throw "The MySQL installation at $mysql lacks C client headers or libmysql.lib."
+          }
+
+          Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.cert.pem' -Value 'test public certificate'
+          Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.key.pem' -Value 'test private key sentinel'
+          cmake --version
+          $boostLibraries = Join-Path $env:RUNNER_TEMP 'Boost libraries'
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DTOOLS=ON "-DCMAKE_INSTALL_PREFIX=$env:RUNNER_TEMP/felsoria-install" "-DBOOST_ROOT:PATH=$env:FELSORIA_CI_BOOST" "-DBOOST_LIBRARYDIR:PATH=$boostLibraries" "-DOPENSSL_ROOT_DIR=$openssl" "-DMYSQL_INCLUDE_DIR=$mysqlInclude" "-DMYSQL_LIBRARY=$mysqlLibrary"
+          if ($LASTEXITCODE -ne 0) { throw 'Felsoria CMake configuration failed.' }
+
+          $manifest = Get-Content 'build\src\tools\map_extractor\FelsoriaDB2Files.txt'
+          if ($manifest.Count -ne 604 -or ($manifest | Sort-Object -Unique).Count -ne 604) {
+            throw "Expected 604 unique DB2 filenames, got $($manifest.Count)."
+          }
+          Write-Host "Generated $($manifest.Count) DB2 filenames."
+
+      - name: Compile Battle.net and data tools
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel 2 --target bnetserver mapextractor vmap4extractor vmap4assembler mmaps_generator
+          if ($LASTEXITCODE -ne 0) { throw 'Battle.net and data tool build failed.' }
+          $bin = 'build\bin\RelWithDebInfo'
+          if (!(Test-Path "$bin\bnetserver.cert.pem") -or (Test-Path "$bin\bnetserver.key.pem")) {
+            throw 'The build must copy only the public certificate.'
+          }
+
+      - name: Verify VMAP extraction of a sparse map
+        run: |
+          $env:Path = "$env:ProgramFiles\OpenSSL\bin;$env:Path"
+          python .github/scripts/verify-vmap.py build/bin/RelWithDebInfo/vmap4extractor.exe
+          if ($LASTEXITCODE -ne 0) { throw 'VMAP regression test failed.' }
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: felsoria-database
+          path: ${{ runner.temp }}/FelsoriaSqlLoginTest
+
+      - name: Verify fresh import and Battle.net startup on loopback
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = Join-Path $env:RUNNER_TEMP 'mysql-5.7.44-winx64'
+          $archive = Join-Path $env:RUNNER_TEMP 'felsoria-mysql-5.7.44-winx64.zip'
+          $work = Join-Path $env:RUNNER_TEMP 'FelsoriaAuthSmoke'
+          $sql = Join-Path $env:RUNNER_TEMP 'FelsoriaSqlLoginTest'
+          $sqlZip = Join-Path $sql "Felsoria-Developer-V2-SQL-$($env:GITHUB_SHA.Substring(0, 12)).zip"
+          $sqlHash = (Get-FileHash -LiteralPath $sqlZip -Algorithm SHA256).Hash
+
+          curl.exe --fail --location --retry 3 --output $archive https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'MySQL archive download failed.' }
+          7z.exe x $archive "-o$env:RUNNER_TEMP" -y -bso0 'mysql-5.7.44-winx64\bin\mysqld.exe' 'mysql-5.7.44-winx64\bin\mysql.exe' 'mysql-5.7.44-winx64\lib\*' 'mysql-5.7.44-winx64\share\*'
+          if ($LASTEXITCODE -ne 0) { throw 'MySQL extraction failed.' }
+
+          $sdk = Split-Path (Split-Path (Get-Command mysql.exe).Source)
+          $opensslDir = Join-Path $env:ProgramFiles 'OpenSSL\bin'
+          $env:Path = "$opensslDir;$sdk\lib;$env:Path"
+          $openssl = Join-Path $opensslDir 'openssl.exe'
+          $exeDir = (Resolve-Path 'build\bin\RelWithDebInfo').Path
+          $mysqld = Join-Path $base 'bin\mysqld.exe'
+          $mysql = Join-Path $base 'bin\mysql.exe'
+          $data = Join-Path $work 'mysql-data'
+          $port = 33317
+          $bnetPort = 31119
+          $restPort = 38081
+          $myArgs = @('--no-defaults', '--protocol=TCP', '--host=127.0.0.1', "--port=$port", '--user=root', '--skip-password', '--batch', '--raw', '--skip-column-names')
+          if (Get-NetTCPConnection -State Listen | Where-Object LocalPort -in $port,$bnetPort,$restPort) { throw 'A test port is occupied.' }
+          New-Item -ItemType Directory -Path $work, "$work\logs" | Out-Null
+          & $mysqld --no-defaults --initialize-insecure "--basedir=$base" "--datadir=$data" --console
+          if ($LASTEXITCODE -ne 0) { throw 'MySQL initialization failed.' }
+
+          $mysqlProc = $null
+          $bnetProc = $null
+          try {
+            $mysqlProc = Start-Process -FilePath $mysqld -WorkingDirectory $base -PassThru -ArgumentList @(
+              '--no-defaults', "--basedir=$base", "--datadir=$data", '--bind-address=127.0.0.1', "--port=$port", "--log-error=$work/mysql.err"
+            )
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              if ($mysqlProc.HasExited) { throw 'MySQL exited during startup.' }
+              $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Where-Object OwningProcess -eq $mysqlProc.Id
+              if ($listener) { break }
+              Start-Sleep -Milliseconds 500
+            }
+            if (!$listener) { throw 'MySQL failed to open its test port.' }
+
+            $identity = & $mysql @myArgs '--execute=SELECT @@datadir, @@port, @@version'
+            Write-Host "MySQL fixture identity: $identity"
+            $fields = ([string]$identity) -split "\t"
+            if ($LASTEXITCODE -ne 0 -or $fields.Count -ne 3 -or
+                $fields[0].Replace('/', '\').TrimEnd([char]'\') -ne $data -or
+                $fields[1] -ne "$port" -or $fields[2] -ne '5.7.44') {
+              throw 'The real MySQL instance does not match the isolated 5.7.44 fixture.'
+            }
+
+            $import = @{
+              MySqlExecutable = $mysql
+              Port = $port
+              DataDirectory = $data
+              SqlZip = $sqlZip
+              Sha256 = $sqlHash
+              SourceCommit = $env:GITHUB_SHA
+              SkipPassword = $true
+            }
+            & .\sql\Import-FelsoriaDatabase.ps1 @import
+
+            & $mysql @myArgs '--execute=CREATE TABLE auth.ci_import_guard (id INT PRIMARY KEY); INSERT INTO auth.ci_import_guard VALUES (37);'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the import guard fixture.' }
+            $rejected = $false
+            try {
+              & .\sql\Import-FelsoriaDatabase.ps1 @import
+            } catch {
+              if ($_ -notmatch 'The import stopped') { throw }
+              $rejected = $true
+            }
+            if (!$rejected) { throw 'The importer accepted an occupied schema.' }
+            $preserved = & $mysql @myArgs '--execute=SELECT id FROM auth.ci_import_guard'
+            if ($LASTEXITCODE -ne 0 -or $preserved -ne '37') { throw 'The refused import altered the fixture.' }
+
+            $usernameHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('CI@FELSORIA.INVALID')))
+            $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("${usernameHash}:SMOKETEST533"))
+            [array]::Reverse($digest)
+            $fixtureHash = [Convert]::ToHexString($digest)
+            $insert = "INSERT INTO auth.account (username, sha_pass_hash) VALUES ('CI@FELSORIA.INVALID', '$fixtureHash')"
+            & $mysql @myArgs "--execute=$insert"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not insert the ephemeral test account.' }
+
+            & $openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=127.0.0.1' -keyout "$work\bnetserver.key.pem" -out "$work\bnetserver.cert.pem" 2>$null
+            if ($LASTEXITCODE -ne 0) { throw 'Certificate fixture generation failed.' }
+            $conf = Get-Content (Join-Path $exeDir 'bnetserver.conf.dist') -Raw
+            $conf = $conf -replace '(?m)^LoginDatabaseInfo[ \t]*=.*$', ('LoginDatabaseInfo = "127.0.0.1;{0};root;;auth"' -f $port)
+            $conf = $conf -replace '(?m)^LogsDir[ \t]*=.*$', 'LogsDir = "./logs"'
+            $conf = $conf -replace '(?m)^BindIP[ \t]*=.*$', 'BindIP = "127.0.0.1"'
+            $conf = $conf -replace '(?m)^BattlenetPort[ \t]*=.*$', "BattlenetPort = $bnetPort"
+            $conf = $conf -replace '(?m)^LoginREST.Port[ \t]*=.*$', "LoginREST.Port = $restPort"
+            [IO.File]::WriteAllText((Join-Path $work 'bnetserver.conf'), $conf)
+            $realmFixture = @(
+              "INSERT INTO auth.realmlist (id, name, address, localAddress, port, gamebuild) VALUES (4000, 'Unmanaged fixture', '192.0.2.77', '192.0.2.77', 8085, 26972)"
+              "UPDATE auth.realmlist SET address='127.0.0.2', localAddress='127.0.0.2' WHERE id=1 OR id IN (SELECT realm_id FROM auth.felsoria_eu_legion_catalog WHERE enabled=1)"
+              'CREATE TABLE auth.ci_enabled_realms AS SELECT realm_id FROM auth.felsoria_eu_legion_catalog WHERE enabled=1'
+              'UPDATE auth.felsoria_eu_legion_catalog SET enabled=0'
+            ) -join ';'
+            & $mysql @myArgs "--execute=$realmFixture"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the realm fixtures.' }
+            $aliasCount = & $mysql @myArgs '--execute=SELECT COUNT(*) FROM auth.ci_enabled_realms'
+            if ($LASTEXITCODE -ne 0 -or [int]$aliasCount -lt 1) { throw 'The test ZIP has no enabled realm aliases.' }
+            $realmCount = & $mysql @myArgs '--execute=SELECT COUNT(*) FROM auth.realmlist WHERE flag <> 3'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not count the fixture realms.' }
+
+            $bnetProc = Start-Process -FilePath (Join-Path $exeDir 'bnetserver.exe') -WorkingDirectory $work -PassThru -RedirectStandardOutput "$work\bnet.invalid.out" -RedirectStandardError "$work\bnet.invalid.err"
+            if (!$bnetProc.WaitForExit(30000) -or $bnetProc.ExitCode -ne 1 -or
+                !(Select-String -LiteralPath "$work\logs\Bnet.log" -SimpleMatch 'FELSORIA_REALM_DATA_INCOMPATIBLE')) {
+              throw 'Battle.net did not refuse the incomplete AUTH catalog.'
+            }
+            $physical = & $mysql @myArgs '--execute=SELECT address FROM auth.realmlist WHERE id=1'
+            if ($LASTEXITCODE -ne 0 -or $physical -ne '127.0.0.2') {
+              throw 'Battle.net changed the realm address before rejecting the incomplete catalog.'
+            }
+            & $mysql @myArgs '--execute=UPDATE auth.felsoria_eu_legion_catalog SET enabled=1 WHERE realm_id IN (SELECT realm_id FROM auth.ci_enabled_realms)'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restore the fixture catalog.' }
+
+            $bnetProc = Start-Process -FilePath (Join-Path $exeDir 'bnetserver.exe') -WorkingDirectory $work -PassThru -RedirectStandardOutput "$work\bnet.out" -RedirectStandardError "$work\bnet.err"
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              if ($bnetProc.HasExited) { throw 'Battle.net exited before opening both ports.' }
+              $listeners = @(Get-NetTCPConnection -State Listen -OwningProcess $bnetProc.Id -ErrorAction SilentlyContinue |
+                Where-Object { $_.LocalAddress -eq '127.0.0.1' -and $_.LocalPort -in $bnetPort,$restPort })
+              if (($listeners.LocalPort | Sort-Object -Unique).Count -eq 2) { break }
+              Start-Sleep -Milliseconds 500
+            }
+            if (($listeners.LocalPort | Sort-Object -Unique).Count -ne 2) { throw 'Battle.net did not open both loopback ports.' }
+
+            $url = "https://127.0.0.1:$restPort/bnetserver/login/"
+            $form = Invoke-WebRequest -Uri $url -SkipCertificateCheck -TimeoutSec 10
+            if ($form.StatusCode -ne 200 -or $form.Content -notmatch 'account_name') { throw 'Battle.net login form did not respond.' }
+            $body = @{inputs = @(
+              @{input_id = 'account_name'; value = 'ci@felsoria.invalid'},
+              @{input_id = 'password'; value = 'smoketest533'}
+            )} | ConvertTo-Json -Depth 5 -Compress
+            $reply = Invoke-RestMethod -Uri $url -SkipCertificateCheck -TimeoutSec 10 -Method Post -ContentType 'application/json' -Body $body
+            if ($reply.authentication_state -ne 'DONE' -or [string]::IsNullOrEmpty($reply.login_ticket)) { throw 'Battle.net did not issue a ticket for the fixture account.' }
+            if (!(Select-String -LiteralPath "$work\logs\Bnet.log" -SimpleMatch "All realms loaded successfully ($realmCount realms).")) {
+              throw 'The default Battle.net configuration did not load all fixture realm rows.'
+            }
+            $unmanaged = & $mysql @myArgs "--execute=SELECT CONCAT(address, '/', localAddress) FROM auth.realmlist WHERE id=4000"
+            if ($LASTEXITCODE -ne 0 -or $unmanaged -ne '192.0.2.77/192.0.2.77') {
+              throw 'Address synchronization modified an unmanaged realm.'
+            }
+            $managed = & $mysql @myArgs "--execute=SELECT COUNT(*) FROM auth.realmlist WHERE (id=1 OR id IN (SELECT realm_id FROM auth.felsoria_eu_legion_catalog WHERE enabled=1)) AND address='127.0.0.1' AND localAddress='127.0.0.1'"
+            if ($LASTEXITCODE -ne 0 -or [int]$managed -ne (1 + [int]$aliasCount)) {
+              throw 'Address synchronization missed a configured realm.'
+            }
+            Write-Host 'Battle.net and HTTPS listeners owned by the new running process. Login form returned HTTP 200 and the fixture account received a ticket.'
+          } catch {
+            foreach ($log in "$work\mysql.err", "$work\logs\Bnet.log", "$work\bnet.err") {
+              if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 25 }
+            }
+            throw
+          } finally {
+            foreach ($proc in $bnetProc,$mysqlProc) {
+              if ($proc -and !$proc.HasExited) { Stop-Process -InputObject $proc }
+            }
+          }
+
+      - name: Compile worldserver and verify installation output
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel 2 --target worldserver
+          if ($LASTEXITCODE -ne 0) { throw 'Worldserver build failed.' }
+          cmake --install build --config RelWithDebInfo
+          if ($LASTEXITCODE -ne 0) { throw 'Felsoria installation failed.' }
+          $install = Join-Path $env:RUNNER_TEMP 'felsoria-install'
+          $files = Get-ChildItem -LiteralPath $install -Recurse -File
+          if ('bnetserver.cert.pem' -notin $files.Name -or 'bnetserver.key.pem' -in $files.Name) {
+            throw 'The install must copy only the public certificate.'
+          }

@@ -52,7 +52,7 @@ bool ExtractSingleModel(std::string& fname)
     return mdl.ConvertToVMAPModel(output.c_str());
 }
 
-void ExtractGameobjectModels()
+bool ExtractGameobjectModels()
 {
     printf("Extracting GameObject models...");
     DBCFile dbc("DBFilesClient\\GameObjectDisplayInfo.db2", "nifffffffft");
@@ -78,7 +78,7 @@ void ExtractGameobjectModels()
     if (!modelList)
     {
         printf("Fatal error: Could not open file %s\n", modelListPath.c_str());
-        return;
+        return false;
     }
 
     size_t maxFileId = fileData.getMaxId() + 1;
@@ -133,9 +133,11 @@ void ExtractGameobjectModels()
         }
     }
 
-    fclose(modelList);
-
+    bool const complete = !ferror(modelList);
+    bool const closed = fclose(modelList) == 0;
     delete[] fileDataIndex;
 
-    printf("Done!\n");
+    if (complete && closed)
+        printf("Done!\n");
+    return complete && closed;
 }

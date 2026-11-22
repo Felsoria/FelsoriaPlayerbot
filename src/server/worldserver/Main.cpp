@@ -797,6 +797,12 @@ bool StartDB()
         return false;
     }
 
+    if (!RealmList::ValidateFelsoriaRealmData())
+    {
+        StopDB();
+        return false;
+    }
+
     dbString = sConfigMgr->GetStringDefault("HotfixDatabaseInfo", "");
     if (dbString.empty())
     {
