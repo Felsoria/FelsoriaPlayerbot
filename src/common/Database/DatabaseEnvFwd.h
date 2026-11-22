@@ -20,6 +20,15 @@
 
 #include <future>
 #include <memory>
+#include <type_traits>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+#include <mysql.h>
+
+// MySQL 5.7 and 8.x use different types for prepared-statement flags.
+using MySQLBindBoolean = std::remove_pointer_t<decltype(MYSQL_BIND::is_null)>;
 
 class Field;
 
@@ -43,12 +52,5 @@ typedef std::shared_ptr<Transaction> SQLTransaction;
 class SQLQueryHolder;
 typedef std::future<SQLQueryHolder*> QueryResultHolderFuture;
 typedef std::promise<SQLQueryHolder*> QueryResultHolderPromise;
-
-// mysql
-typedef struct st_mysql MYSQL;
-typedef struct st_mysql_res MYSQL_RES;
-typedef struct st_mysql_field MYSQL_FIELD;
-typedef struct st_mysql_bind MYSQL_BIND;
-typedef struct st_mysql_stmt MYSQL_STMT;
 
 #endif // DatabaseEnvFwd_h__
