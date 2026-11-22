@@ -49,6 +49,8 @@ Open a [GitHub issue](https://github.com/Felsoria/felsoria-source/issues) to rep
 
 To submit a fix, open a [pull request](https://github.com/Felsoria/felsoria-source/pulls) with the behavior it changes, how you tested it, and any SQL or configuration changes needed to use it.
 
+Add database changes as [versioned SQL migrations](sql/updates/README.md). The release workflow applies these migrations to the verified baseline when generating a new install ZIP.
+
 ## Credits and license
 
 Felsoria builds on LegionPlayerBot, LegionCore, and the work of TrinityCore contributors. See [COPYING](COPYING) for the GNU General Public License text and the source headers for copyright and attribution notices.
