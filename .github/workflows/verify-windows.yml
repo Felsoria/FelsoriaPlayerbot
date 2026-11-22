@@ -1,0 +1,142 @@
+name: Verify Windows installation fixes
+
+on:
+  push:
+    branches: [verify/windows-install-tls]
+    paths:
+      - ".github/workflows/verify-windows.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "dep/**"
+      - "src/**"
+
+permissions:
+  contents: read
+
+jobs:
+  vs2022:
+    runs-on: windows-2022
+    timeout-minutes: 55
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare x64 Boost 1.78.0
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'boost_1_78_0.7z'
+          $boost = Join-Path $env:RUNNER_TEMP 'boost_1_78_0'
+          curl.exe --fail --location --retry 3 --output $archive https://archives.boost.io/release/1.78.0/source/boost_1_78_0.7z
+          if ($LASTEXITCODE -ne 0) { throw 'Boost download failed.' }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash
+          if ($hash -ne '090cefea470bca990fa3f3ed793d865389426915b37a2a3258524a7258f0790c') { throw 'Boost checksum mismatch.' }
+
+          7z.exe x $archive "-o$env:RUNNER_TEMP" -y -bso0
+          if ($LASTEXITCODE -ne 0) { throw 'Boost extraction failed.' }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2022 with MSVC was not found.' }
+          & (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+
+          Push-Location $boost
+          try {
+            cmd.exe /d /c bootstrap.bat
+            if ($LASTEXITCODE -ne 0) { throw 'Boost bootstrap failed.' }
+            .\b2.exe -j2 toolset=msvc-14.3 address-model=64 link=static runtime-link=shared threading=multi variant=release --layout=versioned --with-system --with-filesystem --with-thread --with-program_options --with-iostreams --with-regex stage
+            if ($LASTEXITCODE -ne 0) { throw 'Boost compilation failed.' }
+            Move-Item -LiteralPath '.\stage\lib' -Destination (Join-Path $env:RUNNER_TEMP 'Boost libraries')
+          } finally {
+            Pop-Location
+          }
+          "FELSORIA_CI_BOOST=$boost" >> $env:GITHUB_ENV
+
+      - name: Configure the clean source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $openssl = Join-Path $env:ProgramFiles 'OpenSSL'
+          $mysql = Split-Path (Split-Path (Get-Command mysql.exe -ErrorAction Stop).Source)
+          $mysqlInclude = Join-Path $mysql 'include'
+          $mysqlLibrary = Join-Path $mysql 'lib\libmysql.lib'
+          if (!(Test-Path (Join-Path $mysqlInclude 'mysql.h')) -or !(Test-Path $mysqlLibrary)) {
+            throw "The MySQL installation at $mysql lacks C client headers or libmysql.lib."
+          }
+
+          cmake --version
+          $boostLibraries = Join-Path $env:RUNNER_TEMP 'Boost libraries'
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DTOOLS=ON "-DBOOST_ROOT:PATH=$env:FELSORIA_CI_BOOST" "-DBOOST_LIBRARYDIR:PATH=$boostLibraries" "-DOPENSSL_ROOT_DIR=$openssl" "-DMYSQL_INCLUDE_DIR=$mysqlInclude" "-DMYSQL_LIBRARY=$mysqlLibrary"
+          if ($LASTEXITCODE -ne 0) { throw 'Felsoria CMake configuration failed.' }
+
+          $manifest = Get-Content 'build\src\tools\map_extractor\FelsoriaDB2Files.txt'
+          if ($manifest.Count -ne 604 -or ($manifest | Sort-Object -Unique).Count -ne 604) {
+            throw "Expected 604 unique DB2 filenames, got $($manifest.Count)."
+          }
+          Write-Host "Generated $($manifest.Count) DB2 filenames."
+
+      - name: Compile the Battle.net server and extractors
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel 2 --target bnetserver mapextractor vmap4extractor
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+
+      - name: Check TLS startup and extractor diagnostics
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exeDir = (Resolve-Path 'build\bin\RelWithDebInfo').Path
+          $opensslDir = Join-Path $env:ProgramFiles 'OpenSSL\bin'
+          $mysqlDir = Split-Path (Split-Path (Get-Command mysql.exe).Source)
+          $mysqlLibDir = Join-Path $mysqlDir 'lib'
+          $env:Path = "$opensslDir;$mysqlLibDir;$env:Path"
+          $openssl = Join-Path $opensslDir 'openssl.exe'
+          $bnet = Join-Path $exeDir 'bnetserver.exe'
+          $work = Join-Path $env:RUNNER_TEMP 'Felsoria TLS smoke'
+          New-Item -ItemType Directory -Path $work, "$work\logs", "$work\separate certs", "$work\unpacked" | Out-Null
+          $conf = Get-Content (Join-Path $exeDir 'bnetserver.conf.dist') -Raw
+          $conf = $conf -replace '(?m)^LoginDatabaseInfo[ \t]*=.*$', 'LoginDatabaseInfo = "127.0.0.1;1;fixture;fixture;auth"'
+          $conf = $conf -replace '(?m)^LogsDir[ \t]*=.*$', 'LogsDir = "./logs"'
+
+          Push-Location $work
+          try {
+            foreach ($name in 'one','two') {
+              & $openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=127.0.0.1' -keyout "separate certs/$name.key" -out "separate certs/$name.pem" 2>$null
+              if ($LASTEXITCODE -ne 0) { throw "Could not generate fixture certificate $name." }
+            }
+            foreach ($scenario in 'valid','mismatched','missing','legacy') {
+              $settings = $conf -replace '(?m)^TLS\.(CertificateFile|PrivateKeyFile)[ \t]*=.*\r?\n', ''
+              if ($scenario -eq 'legacy') {
+                Copy-Item 'separate certs\one.pem' 'bnetserver.cert.pem'
+                Copy-Item 'separate certs\one.key' 'bnetserver.key.pem'
+              } else {
+                $caseKey = @{ valid = 'one'; mismatched = 'two'; missing = 'missing' }[$scenario]
+                $settings += "`r`nTLS.CertificateFile = `"separate certs/one.pem`"`r`nTLS.PrivateKeyFile = `"separate certs/$caseKey.key`"`r`n"
+              }
+              [IO.File]::WriteAllText((Join-Path $work 'bnetserver.conf'), $settings)
+              $process = Start-Process -FilePath $bnet -WorkingDirectory $work -Wait -PassThru -RedirectStandardOutput "$work\$scenario.out" -RedirectStandardError "$work\$scenario.err"
+              $log = Get-Content "$work\logs\Bnet.log" -Raw
+              if ($process.ExitCode -ne 1) { throw "Unexpected process exit for $scenario ($($process.ExitCode))." }
+              if ($scenario -in 'valid','legacy') {
+                if ($log -notmatch 'Loaded Battle.net TLS certificate' -or $log -notmatch 'self-signed certificate' -or $log -notmatch 'Could not connect to MySQL') {
+                  throw "The valid TLS fixture did not pass startup for $scenario."
+                }
+              } elseif ($log -notmatch 'Could not load Battle.net TLS private key|do not match' -or $log -match 'Could not connect to MySQL') {
+                throw "An invalid TLS fixture was not rejected for $scenario."
+              }
+              Write-Host "TLS $scenario passed"
+            }
+
+            $map = Start-Process -FilePath (Join-Path $exeDir 'mapextractor.exe') -ArgumentList '-e 1 -i unpacked -o output' -WorkingDirectory $work -Wait -PassThru -RedirectStandardError "$work\map.err"
+            if ($map.ExitCode -ne 1 -or (Get-Content "$work\map.err" -Raw) -notmatch "requires unpacked.*under 'unpacked'" -or (Test-Path 'output')) {
+              throw 'Map extraction did not reject the invalid -i input.'
+            }
+
+            $vmap = Start-Process -FilePath (Join-Path $exeDir 'vmap4extractor.exe') -ArgumentList '-d unpacked' -WorkingDirectory $work -Wait -PassThru -RedirectStandardError "$work\vmap.err"
+            if ($vmap.ExitCode -ne 1 -or (Get-Content "$work\vmap.err" -Raw) -notmatch "Missing unpacked client file 'unpacked" -or (Test-Path 'Buildings')) {
+              throw 'Vmap extraction did not reject the invalid -d input.'
+            }
+            Write-Host 'Extractor input diagnostics passed'
+          } finally {
+            Pop-Location
+          }
