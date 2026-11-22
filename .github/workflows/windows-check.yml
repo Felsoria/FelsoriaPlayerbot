@@ -255,14 +255,14 @@ jobs:
             }
           }
 
-      - name: Compile worldserver and verify installation output
+      - name: Compile worldserver and verify the Battle.net install
         run: |
           cmake --build build --config RelWithDebInfo --parallel 2 --target worldserver
           if ($LASTEXITCODE -ne 0) { throw 'Worldserver build failed.' }
-          cmake --install build --config RelWithDebInfo
-          if ($LASTEXITCODE -ne 0) { throw 'Felsoria installation failed.' }
+          cmake -DCMAKE_INSTALL_CONFIG_NAME=RelWithDebInfo -P build/src/server/bnetserver/cmake_install.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Battle.net installation failed.' }
           $install = Join-Path $env:RUNNER_TEMP 'felsoria-install'
           $files = Get-ChildItem -LiteralPath $install -Recurse -File
-          if ('bnetserver.cert.pem' -notin $files.Name -or 'bnetserver.key.pem' -in $files.Name) {
+          if ('bnetserver.exe' -notin $files.Name -or 'bnetserver.cert.pem' -notin $files.Name -or 'bnetserver.key.pem' -in $files.Name) {
             throw 'The install must copy only the public certificate.'
           }
