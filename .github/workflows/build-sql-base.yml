@@ -1,0 +1,105 @@
+name: Build Felsoria SQL base
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sql/updates/**/*.sql'
+      - '.github/scripts/build-sql-base.py'
+      - '.github/workflows/build-sql-base.yml'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: >-
+      (github.event_name != 'release' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'release' && github.event.release.tag_name != 'database-v2-20261121')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BASE_TAG: database-v2-20261121
+      BASE_ASSET: Felsoria-Developer-V2-SQL-Clean-20261121.zip
+      DB_CONTAINER: felsoria-sql-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the source revision is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Download the pinned baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download "$BASE_TAG" --repo "$GITHUB_REPOSITORY"
+          --pattern "$BASE_ASSET" --dir "$RUNNER_TEMP/felsoria-base"
+
+      - name: Start isolated MySQL 5.7.44
+        run: >-
+          docker run -d --name "$DB_CONTAINER" --network none
+          -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:5.7.44-oraclelinux7
+          --lower-case-table-names=1 --max-allowed-packet=64M
+
+      - name: Build the SQL package
+        run: |
+          python3 .github/scripts/build-sql-base.py \
+            --baseline "$RUNNER_TEMP/felsoria-base/$BASE_ASSET" \
+            --updates sql/updates --container "$DB_CONTAINER" --commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/felsoria-output/Felsoria-Developer-V2-SQL-${GITHUB_SHA:0:12}.zip"
+
+      - name: Upload the generated SQL package
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: felsoria-database
+          path: ${{ runner.temp }}/felsoria-output/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Remove the disposable database
+        if: always()
+        run: |
+          if docker container inspect "$DB_CONTAINER" >/dev/null 2>&1; then
+            docker rm -f -v "$DB_CONTAINER"
+          fi
+
+  publish:
+    if: github.event_name == 'release'
+    needs: build
+    concurrency:
+      group: felsoria-sql-release-${{ github.event.release.id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: felsoria-database
+          path: ${{ runner.temp }}/felsoria-output
+
+      - name: Attach the verified build to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          asset="$RUNNER_TEMP/felsoria-output/Felsoria-Developer-V2-SQL-${GITHUB_SHA:0:12}.zip"
+          digest=$(sha256sum "$asset" | cut -d' ' -f1)
+          tag=$(jq -rn --arg tag "$RELEASE_TAG" '$tag | @uri')
+          remote=$(gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$tag" \
+            | jq -r --arg name "$(basename "$asset")" '.assets[] | select(.name == $name) | .digest // "unknown"')
+          if [[ "$remote" == "sha256:$digest" ]]; then
+            echo "The matching package is already attached."
+          elif [[ -n "$remote" ]]; then
+            echo "::error::The release already has an asset with this name and different contents."
+            exit 1
+          else
+            gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+          fi
