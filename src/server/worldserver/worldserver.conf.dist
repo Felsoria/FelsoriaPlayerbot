@@ -2992,3 +2992,30 @@ QuestPOI.DisableErrors = 1
 #
 ###################################################################################################
 
+# Show the bundled EU Legion aliases for the local worldserver (RealmID 1).
+Felsoria.VirtualRealms.Enable = 1
+Felsoria.VirtualRealms.EULegion.Enable = 1
+Felsoria.VirtualRealms.PlayerRealms.Enable = 1
+Felsoria.VirtualRealms.HideDevelopment.Enable = 1
+Felsoria.VirtualRealms.TournamentDecoration.Enable = 1
+Felsoria.VirtualRealms.Transfer.Enable = 1
+Felsoria.VirtualRealms.Transfer.Preview.Enable = 0
+
+# Assign bots to virtual realms and use the bundled Cyrillic name pool.
+Felsoria.VirtualRealms.BotRealms.Enable = 1
+Felsoria.VirtualRealms.RussianBotNames.Enable = 1
+Felsoria.Battleground.LanguageTeams.Enable = 1
+
+# Provision bots on demand, with a separate reserve for dungeons and battlegrounds.
+LegionForge.DynamicBots.Enable = 1
+LegionForge.DynamicBots.WorldLimit = 50
+LegionForge.DynamicBots.InstanceLimit = 100
+LegionForge.DynamicBots.PartyReserve = 10
+LegionForge.DynamicBots.WorldCacheLimit = 50
+LegionForge.DynamicBots.SpawnBatch = 8
+LegionForge.DynamicBots.SpawnSearchBudgetMs = 4
+LegionForge.DynamicBots.MaxInFlightCreates = 8
+LegionForge.DynamicBots.MaxInFlightLogins = 8
+LegionForge.DynamicBots.CreateTimeoutMs = 60000
+LegionForge.DynamicBots.LoginTimeoutMs = 60000
+LegionForge.DynamicBots.Diagnostics.Enable = 0

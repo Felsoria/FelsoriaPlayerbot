@@ -102,6 +102,34 @@ def check_bootstrap(container):
         raise ValueError("The base archive needs realm 1 and client build 26972 login metadata.")
 
 
+def check_virtual_realms(container):
+    result = run_mysql(
+        container, "mysql", "--batch", "--skip-column-names",
+        "--execute=SELECT "
+        "(SELECT COUNT(*) FROM auth.felsoria_eu_legion_catalog c "
+        "JOIN auth.realmlist r ON r.id = c.realm_id AND r.name = c.realm_name AND r.timezone = c.client_category "
+        "JOIN auth.realmlist physical ON physical.id = 1 "
+        "AND r.address = physical.address AND r.localAddress = physical.localAddress "
+        "AND r.localSubnetMask = physical.localSubnetMask AND r.port = physical.port "
+        "AND r.Region = physical.Region AND r.Battlegroup = physical.Battlegroup "
+        "AND r.gamebuild = physical.gamebuild "
+        "WHERE c.enabled = 1 AND c.visible = 1), "
+        "(SELECT COUNT(*) FROM auth.felsoria_eu_legion_catalog c "
+        "JOIN auth.realmlist r ON r.id = c.realm_id WHERE c.realm_id = 907 "
+        "AND c.enabled = 1 AND c.visible = 0), "
+        "(SELECT COUNT(*) FROM auth.felsoria_realm_schema WHERE id = 1 AND version = 1), "
+        "(SELECT COUNT(*) FROM characters.felsoria_ru_bot_name_pool WHERE guid IS NULL AND account_id IS NULL), "
+        "(SELECT COUNT(*) FROM characters.lf_dynamic_bot_owned), "
+        "(SELECT COUNT(*) FROM world.ai_playerbot_names)",
+        capture_output=True,
+        text=True,
+    )
+    visible, tournament, schema, names, owned, bot_names = map(int, result.stdout.split())
+    if visible < 267 or tournament != 1 or schema != 1 or names < 425 or owned or not bot_names:
+        raise ValueError(f"The base archive has incomplete default realm or bot data: {result.stdout.strip()}")
+    print(f"Verified {visible} visible realms, the tournament entry and {names} unassigned Cyrillic bot names.", flush=True)
+
+
 def write_archive(output, files):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".zip.part")
@@ -151,6 +179,7 @@ def build(baseline, update_dir, output, source_commit, container):
 
         check_empty_player_data(container)
         check_bootstrap(container)
+        check_virtual_realms(container)
         dumps = []
         for database in DATABASES:
             print(f"Exporting {database}", flush=True)
