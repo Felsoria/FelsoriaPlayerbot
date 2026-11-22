@@ -14,7 +14,6 @@ jobs:
     timeout-minutes: 15
     env:
       DB_CONTAINER: felsoria-reimport-${{ github.run_id }}-${{ github.run_attempt }}
-      SQL_DIR: ${{ runner.temp }}/felsoria-sql
       SQL_ZIP: Felsoria-Developer-V2-SQL-f382fbc30166.zip
     steps:
       - uses: actions/checkout@v7.0.1
@@ -26,10 +25,10 @@ jobs:
           name: felsoria-database
           run-id: 45036005386
           github-token: ${{ github.token }}
-          path: ${{ env.SQL_DIR }}
+          path: ${{ runner.temp }}/felsoria-sql
       - name: Verify the downloadable ZIP and its source manifest
         run: |
-          cd "$SQL_DIR"
+          cd "$RUNNER_TEMP/felsoria-sql"
           sha256sum --check <<< "23477a9e5517f87b1af94c261a57e17cfdc644fd245c626dc48e32dada5456eb  $SQL_ZIP"
           python3 - "$SQL_ZIP" "$GITHUB_WORKSPACE" <<'PY'
           import hashlib
@@ -53,6 +52,7 @@ jobs:
       - name: Import the delivered package into empty MySQL 5.7.44 databases
         run: |
           set -euo pipefail
+          SQL_DIR="$RUNNER_TEMP/felsoria-sql"
           docker run -d --name "$DB_CONTAINER" --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:5.7.44-oraclelinux7 --lower-case-table-names=1 --max-allowed-packet=64M
           for attempt in {1..90}; do
             if docker exec "$DB_CONTAINER" mysql --no-defaults --protocol=TCP --host=127.0.0.1 --user=root --execute='SELECT 1' >/dev/null 2>&1; then
