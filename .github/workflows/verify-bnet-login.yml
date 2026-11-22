@@ -128,7 +128,7 @@ jobs:
           $port = 33317
           $bnetPort = 31119
           $restPort = 38081
-          $myArgs = @('--no-defaults', '--protocol=TCP', '--host=127.0.0.1', "--port=$port", '--user=root', '--skip-password', '--batch', '--skip-column-names')
+          $myArgs = @('--no-defaults', '--protocol=TCP', '--host=127.0.0.1', "--port=$port", '--user=root', '--skip-password', '--batch', '--raw', '--skip-column-names')
           if (Get-NetTCPConnection -State Listen | Where-Object LocalPort -in $port,$bnetPort,$restPort) { throw 'A test port is occupied.' }
           New-Item -ItemType Directory -Path $work, "$work\logs" | Out-Null
           & $mysqld --no-defaults --initialize-insecure "--basedir=$base" "--datadir=$data" --console
@@ -149,6 +149,7 @@ jobs:
             if (!$listener) { throw 'MySQL failed to open its test port.' }
 
             $identity = & $mysql @myArgs '--execute=SELECT @@datadir, @@port, @@version'
+            Write-Host "MySQL fixture identity: $identity"
             $fields = ([string]$identity) -split "\t"
             if ($LASTEXITCODE -ne 0 -or $fields.Count -ne 3 -or
                 $fields[0].Replace('/', '\').TrimEnd([char]'\') -ne $data -or
