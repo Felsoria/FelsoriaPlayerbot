@@ -296,3 +296,10 @@ Felsoria.RealmAddressSync.Enable = 1
 Felsoria.RealmAddressSync.RealmID = 1
 Felsoria.RealmAddressSync.IncludeVirtualRealms = 1
 Felsoria.RealmAddressSync.AllRealms = 1
+
+# Show the bundled EU Legion aliases for the local worldserver (RealmID 1).
+Felsoria.VirtualRealms.Enable = 1
+Felsoria.VirtualRealms.EULegion.Enable = 1
+Felsoria.VirtualRealms.PlayerRealms.Enable = 1
+Felsoria.VirtualRealms.HideDevelopment.Enable = 1
+Felsoria.VirtualRealms.TournamentDecoration.Enable = 1

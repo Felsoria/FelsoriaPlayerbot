@@ -15,25 +15,24 @@ Developer V2 is a development snapshot. Quest behavior, encounter mechanics, bat
 
 ## Verified revision
 
-The Windows and database checks below use source commit [`f382fbc`](https://github.com/Felsoria/felsoria-source/commit/f382fbc301662bf33c415fd29795c73a6515b981). Build that revision to pair it with the tested SQL package.
+The Windows build and initial clean-install checks below used [`f382fbc`](https://github.com/Felsoria/felsoria-source/commit/f382fbc301662bf33c415fd29795c73a6515b981). Use the current configuration templates and matching SQL package for the virtual realms and PlayerBot defaults.
 
 - Visual Studio 2022 built `bnetserver`, `worldserver`, and all four data tools in `RelWithDebInfo`. The TLS startup and missing-data diagnostics also passed. [Windows build and startup checks](https://github.com/Felsoria/felsoria-source/actions/runs/45036612628)
 - The generated ZIP was imported into four empty MySQL Server 5.7.44 databases. The realm, client build, empty player data, and migration checksums matched. [SQL reimport](https://github.com/Felsoria/felsoria-source/actions/runs/45036879812)
 - On Windows, `bnetserver` started with the generated `auth.sql`, exposed both loopback listeners, and issued a login ticket for a test account over HTTPS. [Battle.net runtime check](https://github.com/Felsoria/felsoria-source/actions/runs/45038339748)
 
-Character creation, world entry, and full map extraction from client assets require manual verification.
+A manual Windows installation at that revision also created a character and entered the Legion world with a 26972 client. Full map extraction from raw client assets still requires manual verification.
 
 ## 1. Build on Windows
 
 Install Visual Studio 2022 with **Desktop development with C++** and the x64 v143 toolset, CMake 3.31, Boost 1.78.0, the x64 OpenSSL 3 development libraries, and the MySQL x64 C client headers and library. The Windows CI uses the MySQL 8.4 client SDK and runs the login test against MySQL Server 5.7.44.
 
-Clone into a new folder. To reproduce the verified setup, select the tested revision.
+Clone into a new folder. For a tagged release, check out its tag before building.
 
 ```powershell
 New-Item -ItemType Directory -Path 'D:\Felsoria-Local' -Force | Out-Null
 git clone https://github.com/Felsoria/felsoria-source.git D:\Felsoria-Local\source
 Set-Location D:\Felsoria-Local\source
-git switch --detach f382fbc301662bf33c415fd29795c73a6515b981
 ```
 
 Run `bootstrap.bat` from the Boost directory in the VS2022 x64 developer shell. Then build the six static Boost libraries with the shared MSVC runtime. Their output is in `stage/lib`.
@@ -68,9 +67,7 @@ Find the executables and server configuration templates in `build/bin/RelWithDeb
 
 ## 2. Import the database package
 
-Download `felsoria-database.zip` from the `f382fbc` Actions run. Unpack the outer ZIP and then `Felsoria-Developer-V2-SQL-f382fbc30166.zip`. The inner package contains `auth.sql`, `characters.sql`, `world.sql`, `hotfixes.sql`, and `database-manifest.json`. [Verified SQL download](https://github.com/Felsoria/felsoria-source/actions/runs/45036005386/artifacts/14760021090)
-
-The inner ZIP SHA-256 is `23477a9e5517f87b1af94c261a57e17cfdc644fd245c626dc48e32dada5456eb`. For a different source revision, use its matching generated ZIP and check `source_commit` and `applied_migrations` in `database-manifest.json`. Generated ZIPs are attached when a new GitHub release is published from `main`. The original clean snapshot is the input to the build workflow. [SQL builds](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml) · [SQL migrations](sql/updates/README.md)
+Use the generated SQL ZIP attached to your release. For a source install from GitHub Actions, download the `felsoria-database` artifact from the successful build for that revision and unpack the outer ZIP. The generated inner ZIP contains four SQL dumps and `database-manifest.json`. Check `source_commit` and `applied_migrations` in the manifest. For a release ZIP or an Actions artifact, use the SHA-256 recorded by the corresponding build. [Releases](https://github.com/Felsoria/felsoria-source/releases) · [SQL builds](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml)
 
 Use a dedicated local MySQL instance with a new data directory. MySQL 5.7.44 is the verified import target. In your MySQL session, check that the directory and port belong to your new instance before creating any databases. [MySQL Community Server archives](https://downloads.mysql.com/archives/community/)
 
@@ -122,7 +119,11 @@ Copy `bnetserver.conf.dist` to `bnetserver.conf` and `worldserver.conf.dist` to 
 | `worldserver.conf` | `WorldDatabaseInfo` | `world` |
 | `worldserver.conf` | `HotfixDatabaseInfo` | `hotfixes` |
 
-For a local installation, set `BindIP = "127.0.0.1"` in both files and keep `LoginREST.ExternalAddress` and `LoginREST.LocalAddress` at `127.0.0.1`. In `worldserver.conf`, keep `Game.Build.Version = 26972` and match `RealmID = 1` and `WorldServerPort = 8085` to the imported `auth.realmlist` row. Add `LegionForge.DynamicBots.Enable = 1` if you want dynamic bots.
+For a local installation, set `BindIP = "127.0.0.1"` in both files and keep `LoginREST.ExternalAddress` and `LoginREST.LocalAddress` at `127.0.0.1`. In `worldserver.conf`, keep `Game.Build.Version = 26972` and match `RealmID = 1` and `WorldServerPort = 8085` to the imported `auth.realmlist` row. The virtual realm aliases use the same worldserver endpoint.
+
+The templates enable the EU Legion virtual realm list and dynamic PlayerBots. The SQL package seeds 267 playable aliases and one tournament entry for the list. The physical realm stays at ID `1`. Bots are created on demand. The default limits are 50 open-world bots and 100 for instances and battlegrounds, with a party reserve of 10. The package includes 425 unassigned Cyrillic bot names for Russian realms.
+
+Existing installations keep their `.conf` files. Apply the missing migrations and copy the virtual realm and PlayerBot settings you want to use from the new templates. Use the same MySQL instance for AUTH and characters. The AUTH database user needs access to the characters table for character-to-realm mapping.
 
 For Battle.net and its HTTPS login form, provide a PEM certificate chain trusted by your Legion client and its matching private key. The repository ships a public TrinityCore certificate chain. Supply a compatible pair for your client and keep the private key local. A self-signed certificate requires explicit trust in the client. Relative paths resolve from the server's working directory.
 
