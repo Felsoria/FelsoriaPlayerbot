@@ -1,0 +1,89 @@
+name: Reimport the current Felsoria SQL package
+
+on:
+  push:
+    branches: [verify/reimport-7cf2c63]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  reimport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DB_CONTAINER: felsoria-reimport-${{ github.run_id }}-${{ github.run_attempt }}
+      SQL_ZIP: Felsoria-Developer-V2-SQL-7cf2c632b172.zip
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 7cf2c632b172d84beb05b3a205f01faff1f6db3f
+          persist-credentials: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: felsoria-database
+          run-id: 45052156552
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/felsoria-sql
+      - name: Verify the downloadable ZIP and its source manifest
+        run: |
+          cd "$RUNNER_TEMP/felsoria-sql"
+          sha256sum --check <<< "352f08b882a35a45817338f1ab9899225b4c3ded512f2ae4dc306597fbcf3377  $SQL_ZIP"
+          python3 - "$SQL_ZIP" "$GITHUB_WORKSPACE" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          from zipfile import ZipFile
+          with ZipFile(sys.argv[1]) as package:
+              assert sorted(package.namelist()) == [
+                  "auth.sql", "characters.sql", "database-manifest.json", "hotfixes.sql", "world.sql"
+              ], package.namelist()
+              manifest = json.loads(package.read("database-manifest.json"))
+          assert manifest["source_commit"] == "7cf2c632b172d84beb05b3a205f01faff1f6db3f", manifest
+          paths = sorted((Path(sys.argv[2]) / "sql" / "updates").glob("*.sql"))
+          assert [item["file"] for item in manifest["applied_migrations"]] == [path.name for path in paths]
+          for item, path in zip(manifest["applied_migrations"], paths):
+              assert item["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest(), path
+          print("ZIP checksum, source revision, and migration checksums matched.")
+          PY
+
+      - name: Import the delivered package into empty MySQL 5.7.44 databases
+        run: |
+          set -euo pipefail
+          SQL_DIR="$RUNNER_TEMP/felsoria-sql"
+          docker run -d --name "$DB_CONTAINER" --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:5.7.44-oraclelinux7 --lower-case-table-names=1 --max-allowed-packet=64M
+          for attempt in {1..90}; do
+            if docker exec "$DB_CONTAINER" mysql --no-defaults --protocol=TCP --host=127.0.0.1 --user=root --execute='SELECT 1' >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          mysql_cmd=(docker exec -i "$DB_CONTAINER" mysql --no-defaults --protocol=socket --user=root --default-character-set=utf8mb4 --batch --skip-column-names)
+          test "$("${mysql_cmd[@]}" --execute='SELECT VERSION()')" = '5.7.44'
+          for db in auth characters world hotfixes; do
+            "${mysql_cmd[@]}" --execute="CREATE DATABASE $db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            unzip -p "$SQL_DIR/$SQL_ZIP" "$db.sql" | "${mysql_cmd[@]}" --binary-mode --database="$db"
+            tables=$("${mysql_cmd[@]}" --execute="SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='$db' AND TABLE_TYPE='BASE TABLE'")
+            test "$tables" -gt 0
+            printf '%s: %s tables\n' "$db" "$tables"
+          done
+          test "$("${mysql_cmd[@]}" --execute='SELECT CONCAT_WS(":", realm.id, realm.address, realm.localAddress, realm.port, realm.gamebuild, build.majorVersion, build.minorVersion, build.bugfixVersion) FROM auth.realmlist realm JOIN auth.build_info build ON build.build=realm.gamebuild WHERE realm.id=1')" = '1:127.0.0.1:127.0.0.1:8085:26972:7:3:5'
+          test "$("${mysql_cmd[@]}" --execute='SELECT (SELECT COUNT(*) FROM auth.account) + (SELECT COUNT(*) FROM auth.battlenet_accounts) + (SELECT COUNT(*) FROM characters.characters) + (SELECT COUNT(*) FROM characters.lf_dynamic_bot_owned)')" = '0'
+          test "$("${mysql_cmd[@]}" --execute='SELECT content_default FROM world.trinity_string WHERE entry=1029')" = 'Account name must be an email address containing @.'
+          printf '%s\n' 'Realm, client build, empty account/character/bot ownership tables, and string 1029 verified.'
+
+          test "$("${mysql_cmd[@]}" --execute='SELECT CONCAT_WS(":", COUNT(*), SUM(enabled = 1 AND visible = 1), SUM(realm_id = 907 AND enabled = 1 AND visible = 0)) FROM auth.felsoria_eu_legion_catalog')" = '268:267:1'
+          test "$("${mysql_cmd[@]}" --execute='SELECT CONCAT_WS(":", COUNT(*), SUM(r.address = p.address AND r.localAddress = p.localAddress AND r.port = p.port AND r.Region = p.Region AND r.Battlegroup = p.Battlegroup AND r.gamebuild = p.gamebuild)) FROM auth.felsoria_eu_legion_catalog c JOIN auth.realmlist r ON r.id = c.realm_id JOIN auth.realmlist p ON p.id = 1')" = '268:268'
+          test "$("${mysql_cmd[@]}" --execute='SELECT CONCAT_WS(":", COUNT(*), SUM(guid IS NULL AND account_id IS NULL)) FROM characters.felsoria_ru_bot_name_pool')" = '425:425'
+          test "$("${mysql_cmd[@]}" --execute='SELECT version FROM auth.felsoria_realm_schema WHERE id = 1')" = '1'
+          printf '%s\n' '268 aliases share realm 1, including 267 playable entries and one Tournament entry. Verified 425 unassigned Cyrillic names.'
+          "${mysql_cmd[@]}" --execute='SELECT "bot_chat_phrases", COUNT(*) FROM characters.felsoria_bc_phrase UNION ALL SELECT "bot_chat_dialogues", COUNT(*) FROM characters.felsoria_bc_dialogue UNION ALL SELECT "regional_guilds", COUNT(*) FROM characters.felsoria_rg_guild UNION ALL SELECT "store_products", COUNT(*) FROM auth.store_products UNION ALL SELECT "world_bot_name_rows", COUNT(*) FROM world.ai_playerbot_names UNION ALL SELECT "localized_creature_text_rows", COUNT(*) FROM world.felsoria_creature_text_locale UNION ALL SELECT "localized_server_text_rows", COUNT(*) FROM world.felsoria_server_text_locale'
+
+      - name: Remove the disposable database
+        if: always()
+        run: |
+          if docker container inspect "$DB_CONTAINER" >/dev/null 2>&1; then
+            docker rm -f -v "$DB_CONTAINER" >/dev/null
+          fi
