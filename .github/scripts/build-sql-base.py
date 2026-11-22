@@ -85,6 +85,23 @@ def check_empty_player_data(container):
         raise ValueError("Account or character records cannot be included in the base archive.")
 
 
+def check_bootstrap(container):
+    result = run_mysql(
+        container, "mysql", "--batch", "--skip-column-names",
+        "--execute=SELECT COUNT(*) FROM auth.realmlist AS realm "
+        "JOIN auth.build_info AS client ON client.build = realm.gamebuild "
+        "WHERE realm.id = 1 AND realm.port > 0 AND client.build = 26972 "
+        "AND client.majorVersion = 7 AND client.minorVersion = 3 AND client.bugfixVersion = 5 "
+        "AND client.winAuthSeed REGEXP '^[[:xdigit:]]{32}$' "
+        "AND client.win64AuthSeed REGEXP '^[[:xdigit:]]{32}$' "
+        "AND client.mac64AuthSeed REGEXP '^[[:xdigit:]]{32}$'",
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip() != "1":
+        raise ValueError("The base archive needs realm 1 and client build 26972 login metadata.")
+
+
 def write_archive(output, files):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".zip.part")
@@ -133,6 +150,7 @@ def build(baseline, update_dir, output, source_commit, container):
             })
 
         check_empty_player_data(container)
+        check_bootstrap(container)
         dumps = []
         for database in DATABASES:
             print(f"Exporting {database}", flush=True)

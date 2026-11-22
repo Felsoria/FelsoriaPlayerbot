@@ -37,8 +37,26 @@ target_link_libraries(mapextractor
 
 add_dependencies(mapextractor casc)
 
+# The DB2 extractor takes its list from the DB2 stores compiled into worldserver.
+set(DB2_STORES "${CMAKE_SOURCE_DIR}/src/server/game/DataStores/DB2Stores.cpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DB2_STORES}")
+file(STRINGS "${DB2_STORES}" DB2_STORE_DECLARATIONS REGEX "DB2Storage<.*\"[A-Za-z0-9_]+\\.db2\"")
+set(DB2_FILES "")
+foreach(DB2_STORE IN LISTS DB2_STORE_DECLARATIONS)
+  string(REGEX MATCH "\"([A-Za-z0-9_]+\\.db2)\"" DB2_FILENAME "${DB2_STORE}")
+  string(APPEND DB2_FILES "DBFilesClient\\${CMAKE_MATCH_1}\n")
+endforeach()
+if (NOT DB2_FILES)
+  message(FATAL_ERROR "No DB2 table names found in ${DB2_STORES}")
+endif()
+
+set(DB2_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/FelsoriaDB2Files.txt")
+file(GENERATE OUTPUT "${DB2_MANIFEST}" CONTENT "${DB2_FILES}")
+
 if( UNIX )
   install(TARGETS mapextractor DESTINATION bin)
+  install(FILES "${DB2_MANIFEST}" DESTINATION bin)
 elseif( WIN32 )
   install(TARGETS mapextractor DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  install(FILES "${DB2_MANIFEST}" DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()

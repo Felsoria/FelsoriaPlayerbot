@@ -14,16 +14,19 @@ previous migration so existing installations can apply the correction too.
 
 The **Build Felsoria SQL base** workflow restores the verified
 `database-v2-20261121` SQL ZIP into a disposable MySQL 5.7.44 container and
-replays all migrations in revision order. A merge that changes SQL migrations
-produces a downloadable Actions artifact. Publishing a release from a revision
-on `main` also attaches the generated ZIP to that release. The baseline
+replays all migrations in revision order. Pull requests targeting `main` run the
+build before merge and include a downloadable Actions artifact. A merge that
+changes SQL migrations updates the build on `main`. Publishing a release from
+a revision on `main` attaches the generated ZIP to that release. The baseline
 release acts as the input to each new build.
 
 The ZIP contains the four SQL dumps and `database-manifest.json`, with the
 source commit, baseline checksum, and the IDs and SHA-256 checksums of all
 included migrations. The snapshot contains zero player accounts and
-characters. Prepare the realm, client-build metadata and RBAC data for your
-installation as needed.
+characters. It includes local realm 1 and the client build 26972 metadata.
+Create your first account in the worldserver console after setup. The Felsoria
+core grants GM levels through `account_access`, using the worldserver console's
+`account set gmlevel` command.
 
 ## Updating an existing installation
 

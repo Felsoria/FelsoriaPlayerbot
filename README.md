@@ -19,29 +19,36 @@ The development setup uses Windows x64, Visual Studio 2022 with **Desktop develo
 
 ### Prepare dependencies
 
-1. Set `BOOST_ROOT` to the root of your Boost installation, with x64 libraries for MSVC available.
-2. Check the OpenSSL paths in [`dep/openssl/CMakeLists.txt`](dep/openssl/CMakeLists.txt). The current snapshot points to `D:/OpenSSL-Win64`. Adjust the include and library paths to match your installation.
-3. If CMake cannot find MySQL, set `MYSQL_INCLUDE_DIR` to the directory containing `mysql.h` and `MYSQL_LIBRARY` to the path of `libmysql.lib` when configuring.
-4. Set up a TLS certificate and matching private key for your login endpoint. Place them in `src/server/bnetserver/` as `bnetserver.cert.pem` and `bnetserver.key.pem` for the build to copy. Keep the private key local.
+1. Set `BOOST_ROOT` to a Boost installation with x64 libraries for MSVC.
+2. Install the x64 OpenSSL 3 development package. Set `OPENSSL_ROOT_DIR` at configure time if CMake needs the install location.
+3. If CMake cannot find MySQL, set `MYSQL_INCLUDE_DIR` to the directory containing `mysql.h` and `MYSQL_LIBRARY` to the path of `libmysql.lib`.
 
-Run the following commands in PowerShell from the repository root.
+Run this in PowerShell from the repository root. Set the OpenSSL path to the location you installed.
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config RelWithDebInfo --target bnetserver worldserver
+$opensslRoot = 'D:\OpenSSL-Win64'
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DOPENSSL_ROOT_DIR=$opensslRoot" -DTOOLS=ON
+cmake --build build --config RelWithDebInfo --target bnetserver worldserver mapextractor vmap4extractor vmap4assembler mmaps_generator
 ```
 
-The server executables are written to `build/bin/RelWithDebInfo/`. You can enable the extraction tool targets by adding `-DTOOLS=ON` to the configure command.
+The executables are written to `build/bin/RelWithDebInfo/`. For dynamically linked dependencies, make the matching x64 OpenSSL and MySQL runtime DLLs available next to the executables or on `PATH`.
+
+### Prepare the client data
+
+Use a Legion 7.3.5 client with build **26972**. Prepare a separate data directory for the new realm and run the extraction tools against that client.
+
+1. Copy `build/src/tools/map_extractor/FelsoriaDB2Files.txt` to your data directory. To extract DB2 files, run `mapextractor.exe -e 2 -i <client-directory> -o <data-directory> -l enUS` with your own paths and installed locale. For a different locale, set the corresponding numeric `DBC.Locale` in `worldserver.conf`.
+2. Extract maps with `mapextractor.exe -e 1 -i <client-directory> -o <data-directory>`. Run `vmap4extractor.exe` from the client directory, then run `vmap4assembler.exe <path-to-Buildings> <path-to-vmaps>` with `vmaps` under the data directory.
+3. Create the `mmaps` subdirectory and run `mmaps_generator.exe` with your data directory as its working directory. Supply the matching `gt` game tables from the same client build. The [game table loader](src/server/game/DataStores/GameTables.cpp) lists the required files.
+4. Set `DataDir` in `worldserver.conf` to the directory containing `dbc/<locale>`, `gt`, `maps`, `vmaps` and `mmaps`.
 
 ## Set up a local realm
 
-The repository contains the server source and a custom SQL migration. To run it, supply a compatible Legion 7.3.5 database snapshot, a build 26972 client, and extracted server data from the same client build. The Felsoria development setup uses `ADB_735.10` as its database baseline.
-
-1. Import compatible base schemas and data for `auth`, `characters`, `world`, and `hotfixes`. Configure a realm entry in `auth.realmlist`.
-2. Copy [`bnetserver.conf.dist`](src/server/bnetserver/bnetserver.conf.dist) and [`worldserver.conf.dist`](src/server/worldserver/worldserver.conf.dist) into the runtime directory as `bnetserver.conf` and `worldserver.conf`. Set the database connections and local realm addresses, match `RealmID` to `auth.realmlist`, and keep `Game.Build.Version` at `26972` in both files.
-3. Set `DataDir` in `worldserver.conf` to the extracted client data directory. Include DB2 tables, game tables, maps, vmaps, and mmaps. Create the directories configured under `LogsDir`.
-4. To enable dynamic bots, apply the [bot ownership migration](sql/custom/2026_09_25_legionforge_dynamic_bot_owned.sql) to the `characters` database, then set `LegionForge.DynamicBots.Enable = 1` under `[worldserver]`.
-5. Start MySQL, then `bnetserver.exe` and `worldserver.exe`. Once the world server is ready, connect using the Legion client configured for your realm's login endpoint.
+1. Download the latest generated SQL ZIP from [Releases](https://github.com/Felsoria/felsoria-source/releases), or the `felsoria-database` artifact from a [successful SQL build](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml). The [original clean ZIP](https://github.com/Felsoria/felsoria-source/releases/tag/database-v2-20261121) is also available. Import `auth.sql`, `characters.sql`, `world.sql` and `hotfixes.sql` into four empty databases on a dedicated local MySQL instance. The snapshot was built and tested with MySQL Server 5.7.44. The MySQL client development library used for compilation is a separate dependency.
+2. The generated ZIP seeds local realm ID `1` on `127.0.0.1:8085` and client build `26972`. For the original clean ZIP, apply the [realm and client-build migration](sql/updates/20261122_001_auth_local_realm_and_build.sql) to the empty install's `auth` database after import. The base includes the dynamic bot ownership table. Enable dynamic bots by setting `LegionForge.DynamicBots.Enable = 1` in `worldserver.conf`.
+3. Copy [`bnetserver.conf.dist`](src/server/bnetserver/bnetserver.conf.dist) and [`worldserver.conf.dist`](src/server/worldserver/worldserver.conf.dist) to your runtime directory as `bnetserver.conf` and `worldserver.conf`. Set the database connections to the new MySQL instance, set `BindIP = "127.0.0.1"` in both files for local play, keep `Game.Build.Version = 26972`, and match `RealmID` and `WorldServerPort` to `auth.realmlist`. Create each configured log directory.
+4. In the runtime directory, place a TLS certificate trusted by your configured client and its matching private key as `bnetserver.cert.pem` and `bnetserver.key.pem`. For a local test you can generate your own pair from the runtime directory using `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" -keyout bnetserver.key.pem -out bnetserver.cert.pem`. Keep the key local and configure your client to trust your chosen certificate.
+5. Run `bnetserver.exe` and `worldserver.exe` with the runtime directory as their working directory. After world initialization, enter `account create player@example.invalid <password>` in the worldserver console, substituting your own password. Connect your 26972 client to the local login endpoint and verify that you can create a character and enter the realm.
 
 ## Contributing
 
@@ -49,7 +56,7 @@ Open a [GitHub issue](https://github.com/Felsoria/felsoria-source/issues) to rep
 
 To submit a fix, open a [pull request](https://github.com/Felsoria/felsoria-source/pulls) with the behavior it changes, how you tested it, and any SQL or configuration changes needed to use it.
 
-Add database changes as [versioned SQL migrations](sql/updates/README.md). The release workflow applies these migrations to the verified baseline when generating a new install ZIP.
+Add database changes as [versioned SQL migrations](sql/updates/README.md). GitHub Actions replays the migrations against a fresh database for each pull request targeting `main` and produces a fresh install ZIP.
 
 ## Credits and license
 

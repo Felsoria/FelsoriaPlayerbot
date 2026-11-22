@@ -64,32 +64,38 @@ set_target_properties(bnetserver
       FOLDER
         "server")
 
+set(BNETSERVER_CERTIFICATE "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.cert.pem")
+set(BNETSERVER_PRIVATE_KEY "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.key.pem")
+if (EXISTS "${BNETSERVER_CERTIFICATE}" AND EXISTS "${BNETSERVER_PRIVATE_KEY}")
+  set(BNETSERVER_TLS_FILES "${BNETSERVER_CERTIFICATE}" "${BNETSERVER_PRIVATE_KEY}")
+endif()
+
 if (WIN32)
-  if ("${CMAKE_MAKE_PROGRAM}" MATCHES "MSBuild")
-    add_custom_command(TARGET bnetserver
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.conf.dist ${CMAKE_BINARY_DIR}/bin/$(ConfigurationName)/
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.cert.pem ${CMAKE_BINARY_DIR}/bin/$(ConfigurationName)/
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.key.pem ${CMAKE_BINARY_DIR}/bin/$(ConfigurationName)/
-    )
-  elseif (MINGW)
-    add_custom_command(TARGET bnetserver
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.conf.dist ${CMAKE_BINARY_DIR}/bin/
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.cert.pem ${CMAKE_BINARY_DIR}/bin/
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.key.pem ${CMAKE_BINARY_DIR}/bin/
-    )
+  add_custom_command(TARGET bnetserver POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/bnetserver.conf.dist"
+            "$<TARGET_FILE_DIR:bnetserver>"
+    VERBATIM)
+  if (BNETSERVER_TLS_FILES)
+    add_custom_command(TARGET bnetserver POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              ${BNETSERVER_TLS_FILES} "$<TARGET_FILE_DIR:bnetserver>"
+      VERBATIM)
   endif()
 endif()
 
 if (UNIX)
   install(TARGETS bnetserver DESTINATION bin)
   install(FILES bnetserver.conf.dist DESTINATION ${CONF_DIR})
-  install(FILES bnetserver.cert.pem bnetserver.key.pem DESTINATION bin)
+  if (BNETSERVER_TLS_FILES)
+    install(FILES ${BNETSERVER_TLS_FILES} DESTINATION bin)
+  endif()
 elseif (WIN32)
   install(TARGETS bnetserver DESTINATION "${CMAKE_INSTALL_PREFIX}")
   install(FILES bnetserver.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  install(FILES bnetserver.cert.pem bnetserver.key.pem DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  if (BNETSERVER_TLS_FILES)
+    install(FILES ${BNETSERVER_TLS_FILES} DESTINATION "${CMAKE_INSTALL_PREFIX}")
+  endif()
 endif()
 
 # Generate precompiled header
