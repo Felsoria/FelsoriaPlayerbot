@@ -162,7 +162,11 @@ jobs:
             & $mysql @myArgs --database=auth "--execute=source $dump"
             if ($LASTEXITCODE -ne 0) { throw 'Could not import auth.sql.' }
 
-            $insert = "INSERT INTO auth.account (username, sha_pass_hash) VALUES ('CI@FELSORIA.INVALID', UPPER(SHA2(CONCAT(UPPER(SHA2('CI@FELSORIA.INVALID',256)),':','SMOKETEST533'),256)))"
+            $usernameHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes('CI@FELSORIA.INVALID')))
+            $digest = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes("${usernameHash}:SMOKETEST533"))
+            [array]::Reverse($digest)
+            $fixtureHash = [Convert]::ToHexString($digest)
+            $insert = "INSERT INTO auth.account (username, sha_pass_hash) VALUES ('CI@FELSORIA.INVALID', '$fixtureHash')"
             & $mysql @myArgs "--execute=$insert"
             if ($LASTEXITCODE -ne 0) { throw 'Could not insert the ephemeral test account.' }
 
