@@ -46,6 +46,55 @@ RealmList* RealmList::Instance()
     return &instance;
 }
 
+bool RealmList::ValidateFelsoriaRealmData()
+{
+    bool const euCatalog = sConfigMgr->GetBoolDefault("Felsoria.VirtualRealms.EULegion.Enable", false);
+    bool const playerRealms = sConfigMgr->GetBoolDefault("Felsoria.VirtualRealms.PlayerRealms.Enable", false);
+    if (!euCatalog && !playerRealms)
+        return true;
+
+    if (!sConfigMgr->GetBoolDefault("Felsoria.VirtualRealms.Enable", false))
+    {
+        TC_LOG_ERROR(LOG_FILTER_GENERAL, "FELSORIA_REALM_DATA_INCOMPATIBLE: The EU catalog and player realms require Felsoria.VirtualRealms.Enable.");
+        return false;
+    }
+
+    if (!LoginDatabase.Query("SELECT id FROM realmlist WHERE id = 1 AND flag <> 3"))
+    {
+        TC_LOG_ERROR(LOG_FILTER_GENERAL, "FELSORIA_REALM_DATA_INCOMPATIBLE: The physical realm with ID 1 is missing or invalid.");
+        return false;
+    }
+
+    if (euCatalog)
+    {
+        // A usable catalog contains a playable alias, and every enabled alias has a realmlist row.
+        if (!LoginDatabase.Query("SELECT 1 FROM felsoria_eu_legion_catalog c "
+            "JOIN realmlist r ON r.id = c.realm_id AND r.flag <> 3 "
+            "WHERE c.enabled = 1 AND c.visible = 1 AND c.realm_id BETWEEN 2 AND 65535 "
+            "AND c.realm_id <> 907 AND NOT EXISTS (SELECT 1 FROM felsoria_eu_legion_catalog e "
+            "LEFT JOIN realmlist er ON er.id = e.realm_id AND er.flag <> 3 "
+            "WHERE e.enabled = 1 AND (er.id IS NULL OR e.realm_id NOT BETWEEN 2 AND 65535)) LIMIT 1"))
+        {
+            TC_LOG_ERROR(LOG_FILTER_GENERAL, "FELSORIA_REALM_DATA_INCOMPATIBLE: The EU Legion catalog is missing or incomplete. Import the matching SQL package or apply the AUTH catalog migration.");
+            return false;
+        }
+    }
+    else if (!LoginDatabase.Query("SELECT 1 FROM realmlist WHERE id BETWEEN 901 AND 907 AND flag <> 3 "
+        "HAVING COUNT(*) = 7"))
+    {
+        TC_LOG_ERROR(LOG_FILTER_GENERAL, "FELSORIA_REALM_DATA_INCOMPATIBLE: The legacy virtual realm profile requires realm IDs 901 through 907.");
+        return false;
+    }
+
+    if (playerRealms && !LoginDatabase.Query("SELECT version FROM felsoria_realm_schema WHERE id = 1 AND version = 1"))
+    {
+        TC_LOG_ERROR(LOG_FILTER_GENERAL, "FELSORIA_REALM_DATA_INCOMPATIBLE: Player realm schema version 1 is missing. Apply the matching AUTH migrations.");
+        return false;
+    }
+
+    return true;
+}
+
 // Load the realm list from the database
 void RealmList::Initialize(boost::asio::io_service& ioService, uint32 updateInterval)
 {

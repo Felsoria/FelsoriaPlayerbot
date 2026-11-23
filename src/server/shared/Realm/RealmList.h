@@ -75,6 +75,8 @@ public:
 
     ~RealmList();
 
+    static bool ValidateFelsoriaRealmData();
+
     void Initialize(boost::asio::io_service& ioService, uint32 updateInterval);
     void Close();
 

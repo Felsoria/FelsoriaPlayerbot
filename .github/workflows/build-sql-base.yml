@@ -3,10 +3,6 @@ name: Build Felsoria SQL base
 on:
   push:
     branches: [main]
-    paths:
-      - 'sql/updates/**/*.sql'
-      - '.github/scripts/build-sql-base.py'
-      - '.github/workflows/build-sql-base.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -72,6 +68,11 @@ jobs:
           if docker container inspect "$DB_CONTAINER" >/dev/null 2>&1; then
             docker rm -f -v "$DB_CONTAINER"
           fi
+
+  windows:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    needs: build
+    uses: ./.github/workflows/windows-check.yml
 
   publish:
     if: github.event_name == 'release'

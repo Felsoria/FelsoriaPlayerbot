@@ -175,7 +175,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // _ioService = new boost::asio::io_service();
+    if (!RealmList::ValidateFelsoriaRealmData())
+    {
+        ShutdownThreadPool(threadPool);
+        StopDB();
+        return 1;
+    }
 
     // Start the listening port (acceptor) for auth connections
     int32 bnport = sConfigMgr->GetIntDefault("BattlenetPort", 1119);

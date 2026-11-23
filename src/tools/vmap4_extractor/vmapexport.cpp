@@ -184,8 +184,8 @@ bool ExtractSingleWmo(std::string& fname)
     WMORoot froot(fname);
     if (!froot.open())
     {
-        printf("Couldn't open RootWmo!!!\n");
-        return true;
+        fprintf(stderr, "Could not read WMO root %s.\n", fname.c_str());
+        return false;
     }
     FILE *output = fopen(szLocalFile, "wb");
     if (!output)
@@ -220,46 +220,69 @@ bool ExtractSingleWmo(std::string& fname)
         }
     }
 
-    fseek(output, 8, SEEK_SET); // store the correct no of vertices
-    fwrite(&Wmo_nVertices, sizeof(int), 1, output);
-    fclose(output);
-
-    // Delete the extracted file in the case of an error
+    file_ok = file_ok && fseek(output, 8, SEEK_SET) == 0 &&
+        fwrite(&Wmo_nVertices, sizeof(int), 1, output) == 1 && !ferror(output);
+    file_ok = fclose(output) == 0 && file_ok;
     if (!file_ok)
         remove(szLocalFile);
-    return true;
+    return file_ok;
 }
 
-void ParsMapFiles()
+bool ParseMapFiles()
 {
-    char fn[512];
-    //char id_filename[64];
-    char id[10];
+    bool success = true;
+    unsigned int processedMaps = 0;
     for (unsigned int i = 0; i < map_count; ++i)
     {
-        sprintf(id, "%04u", map_ids[i].id);
-        sprintf(fn, "World\\Maps\\%s\\%s.wdt", map_ids[i].name, map_ids[i].name);
-        WDTFile WDT(fn, map_ids[i].name);
-        if (WDT.init(id, map_ids[i].id))
+        char path[512];
+        snprintf(path, sizeof(path), "World/Maps/%s/%s.wdt", map_ids[i].name, map_ids[i].name);
+        std::string const input = GetRawInputPath(path);
+        boost::system::error_code error;
+        boost::filesystem::file_status const state = boost::filesystem::status(boost::filesystem::path(input), error);
+        // Some entries in Map.db2 have no terrain in this client.
+        if (state.type() == boost::filesystem::file_not_found)
+            continue;
+        if (error || !boost::filesystem::is_regular_file(state))
         {
-            printf("Processing Map %u\n[", map_ids[i].id);
-            for (int x = 0; x < 64; ++x)
-            {
-                for (int y = 0; y < 64; ++y)
-                {
-                    if (ADTFile *ADT = WDT.GetMap(x, y))
-                    {
-                        //sprintf(id_filename,"%02u %02u %03u",x,y,map_ids[i].id);//!!!!!!!!!
-                        ADT->init(map_ids[i].id, x, y);
-                        delete ADT;
-                    }
-                }
-                printf("#");
-                fflush(stdout);
-            }
-            printf("]\n");
+            fprintf(stderr, "Could not read WDT '%s': %s\n", input.c_str(),
+                error ? error.message().c_str() : "not a regular file");
+            success = false;
+            continue;
         }
+
+        WDTFile wdt(path, map_ids[i].name);
+        if (!wdt.init(nullptr, map_ids[i].id))
+        {
+            fprintf(stderr, "Could not convert WDT '%s'.\n", input.c_str());
+            success = false;
+            continue;
+        }
+
+        ++processedMaps;
+        printf("Processing Map %u\n[", map_ids[i].id);
+        for (int x = 0; x < 64; ++x)
+        {
+            for (int y = 0; y < 64; ++y)
+            {
+                if (ADTFile* tile = wdt.GetMap(x, y))
+                {
+                    if (!tile->init(map_ids[i].id, x, y))
+                    {
+                        fprintf(stderr, "Could not convert object tile for %s (%d, %d).\n", map_ids[i].name, x, y);
+                        success = false;
+                    }
+                    delete tile;
+                }
+            }
+            printf("#");
+            fflush(stdout);
+        }
+        printf("]\n");
     }
+
+    if (!processedMaps)
+        fprintf(stderr, "No WDT files were converted. Check the unpacked World/Maps input.\n");
+    return success && processedMaps != 0;
 }
 
 bool processArgv(int argc, char ** argv, const char *versionString)
@@ -352,7 +375,8 @@ int main(int argc, char ** argv)
         success = (errno == EEXIST);
 
     // Extract models, listed in GameObjectDisplayInfo.db2
-    ExtractGameobjectModels();
+    if (success)
+        success = ExtractGameobjectModels();
 
     LoadLiquidTypeDB2Data();
 
@@ -394,7 +418,7 @@ int main(int argc, char ** argv)
         }
 
         delete dbc;
-        ParsMapFiles();
+        success = ParseMapFiles();
         delete[] map_ids;
     }
 
