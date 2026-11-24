@@ -30,6 +30,7 @@ namespace Battlenet
     public:
         static SessionManager& Instance();
 
+        void StartNetwork(std::unique_ptr<AsyncAcceptor> listener, int threadCount);
         bool StartNetwork(boost::asio::io_service& service, std::string const& bindIp, uint16 port, int threadCount = 1) override;
 
     protected:

@@ -57,6 +57,21 @@ WorldSocketMgr& WorldSocketMgr::Instance()
 
 bool WorldSocketMgr::StartNetwork(boost::asio::io_service& service, std::string const& bindIp, uint16 port, int threadCount)
 {
+    Listeners listeners;
+    if (!BindListeners(service, bindIp, port, sWorld->getIntConfig(CONFIG_PORT_INSTANCE), threadCount, listeners))
+        return false;
+    StartNetwork(std::move(listeners), threadCount);
+    return true;
+}
+
+bool WorldSocketMgr::BindListeners(boost::asio::io_service& service, std::string const& bindIp,
+    int32 worldPort, int32 instancePort, int threadCount, Listeners& listeners)
+{
+    if (threadCount < 1)
+    {
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Network.Threads must be greater than 0");
+        return false;
+    }
     _tcpNoDelay = sConfigMgr->GetBoolDefault("Network.TcpNodelay", true);
 
     TC_LOG_DEBUG(LOG_FILTER_NETWORKIO, "Max allowed socket connections %d", boost::asio::socket_base::max_connections);
@@ -68,20 +83,32 @@ bool WorldSocketMgr::StartNetwork(boost::asio::io_service& service, std::string 
 
     if (m_SockOutUBuff <= 0)
     {
-        TC_LOG_ERROR(LOG_FILTER_NETWORKIO, "Network.OutUBuff is wrong in your config file");
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Network.OutUBuff is wrong in your config file");
         return false;
     }
 
-    BaseSocketMgr::StartNetwork(service, bindIp, port, threadCount);
-    _instanceAcceptor = new AsyncAcceptor(service, bindIp, uint16(sWorld->getIntConfig(CONFIG_PORT_INSTANCE)));
+    auto world = AsyncAcceptor::Bind(service, bindIp, worldPort, "WorldServerPort", LOG_FILTER_WORLDSERVER);
+    if (!world)
+        return false;
+    auto instance = AsyncAcceptor::Bind(service, bindIp, instancePort, "InstanceServerPort", LOG_FILTER_WORLDSERVER);
+    if (!instance)
+        return false;
+    listeners.world = std::move(world);
+    listeners.instance = std::move(instance);
+    return true;
+}
+
+void WorldSocketMgr::StartNetwork(Listeners listeners, int threadCount)
+{
+    _acceptor = listeners.world.release();
+    _instanceAcceptor = listeners.instance.release();
+    StartWorkers(threadCount);
 
     _acceptor->SetSocketFactory(std::bind(&BaseSocketMgr::GetSocketForAccept, this));
     _instanceAcceptor->SetSocketFactory(std::bind(&BaseSocketMgr::GetSocketForAccept, this));
 
     _acceptor->AsyncAcceptWithCallback<&OnSocketAccept>();
     _instanceAcceptor->AsyncAcceptWithCallback<&OnSocketAccept>();
-
-    return true;
 }
 
 void WorldSocketMgr::StopNetwork()

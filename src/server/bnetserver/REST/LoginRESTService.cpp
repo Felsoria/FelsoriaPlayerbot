@@ -47,7 +47,7 @@ bool LoginRESTService::Start(boost::asio::io_service& ioService)
 
     _bindIP = sConfigMgr->GetStringDefault("BindIP", "0.0.0.0");
     _port = sConfigMgr->GetIntDefault("LoginREST.Port", 8081);
-    if (_port < 0 || _port > 0xFFFF)
+    if (_port < 1 || _port > 0xFFFF)
     {
         TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Specified login service port (%d) out of allowed range (1-65535), defaulting to 8081", _port);
         _port = 8081;
@@ -73,7 +73,7 @@ bool LoginRESTService::Start(boost::asio::io_service& ioService)
     endPoint = resolver.resolve(localAddressQuery, ec);
     if (endPoint == end || ec)
     {
-        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Could not resolve LoginREST.ExternalAddress %s", configuredAddress.c_str());
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Could not resolve LoginREST.LocalAddress %s", configuredAddress.c_str());
         return false;
     }
 
@@ -99,11 +99,23 @@ bool LoginRESTService::Start(boost::asio::io_service& ioService)
     input->set_type("submit");
     input->set_label("Log In");
 
+    std::unique_ptr<soap> server(new soap(SOAP_C_UTFSTRING, SOAP_C_UTFSTRING));
+
+    // Bind on the startup thread so the ready message requires a working HTTPS endpoint.
+    server->accept_timeout = 3;
+    server->recv_timeout = 5;
+    server->send_timeout = 5;
+    if (!soap_valid_socket(soap_bind(server.get(), _bindIP.c_str(), _port, 100)))
+    {
+        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Couldn't bind to %s:%d", _bindIP.c_str(), _port);
+        return false;
+    }
+
     _loginTicketCleanupTimer = new boost::asio::deadline_timer(ioService);
     _loginTicketCleanupTimer->expires_from_now(boost::posix_time::seconds(10));
     _loginTicketCleanupTimer->async_wait(std::bind(&LoginRESTService::CleanupLoginTickets, this, std::placeholders::_1));
 
-    _thread = std::thread(std::bind(&LoginRESTService::Run, this));
+    _thread = std::thread(&LoginRESTService::Run, this, std::move(server));
     return true;
 }
 
@@ -127,19 +139,9 @@ boost::asio::ip::tcp::endpoint const& LoginRESTService::GetAddressForClient(boos
     return _externalAddress;
 }
 
-void LoginRESTService::Run()
+void LoginRESTService::Run(std::unique_ptr<soap> server)
 {
-    soap soapServer(SOAP_C_UTFSTRING, SOAP_C_UTFSTRING);
-
-    // check every 3 seconds if world ended
-    soapServer.accept_timeout = 3;
-    soapServer.recv_timeout = 5;
-    soapServer.send_timeout = 5;
-    if (!soap_valid_socket(soap_bind(&soapServer, _bindIP.c_str(), _port, 100)))
-    {
-        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Couldn't bind to %s:%d", _bindIP.c_str(), _port);
-        return;
-    }
+    soap& soapServer = *server;
 
     // Address information is logged once after realm address verification.
 

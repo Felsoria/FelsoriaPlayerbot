@@ -163,6 +163,14 @@ extern int main(int argc, char **argv)
 
     FelsoriaStartup::Guard felsoriaStartup;
 
+    // Hold both ports before changing realm or character state. Start accepting after world initialization.
+    int const networkThreads = sConfigMgr->GetIntDefault("Network.Threads", 1);
+    WorldSocketMgr::Listeners listeners;
+    if (!sWorldSocketMgr.BindListeners(_ioService, sConfigMgr->GetStringDefault("BindIP", "0.0.0.0"),
+        sConfigMgr->GetIntDefault("WorldServerPort", 8085), sConfigMgr->GetIntDefault("InstanceServerPort", 8086),
+        networkThreads, listeners))
+        return ERROR_EXIT_CODE;
+
     OpenSSLCrypto::threadsSetup();
     cds::Initialize();
     cds::gc::HP hpGC;
@@ -211,14 +219,15 @@ extern int main(int argc, char **argv)
     if (!StartDB())
     {
         ShutdownThreadPool(threadPool);
+        StopDB();
         return 1;
     }
 
     // Set server offline (not connectable)
     LoginDatabase.DirectPExecute("UPDATE realmlist SET flag = flag | %u WHERE id = '%d'", REALM_FLAG_OFFLINE, realm.Id.Realm);
    
+    realm.Flags = RealmFlags(realm.Flags | REALM_FLAG_OFFLINE);
     sRealmList->Initialize(_ioService, sConfigMgr->GetIntDefault("RealmsStateUpdateDelay", 10));
-    LoadRealmInfo();
 
     // Initialize the World
     sScriptMgr->SetScriptLoader(AddScripts);
@@ -241,17 +250,7 @@ extern int main(int argc, char **argv)
         soapThread = new std::thread(TCSoapThread, sConfigMgr->GetStringDefault("SOAP.IP", "127.0.0.1"), uint16(sConfigMgr->GetIntDefault("SOAP.Port", 7878)));
     }
 
-    uint16 worldPort = uint16(sWorld->getIntConfig(CONFIG_PORT_WORLD));
-    std::string worldListener = sConfigMgr->GetStringDefault("BindIP", "0.0.0.0");
-
-    int networkThreads = sConfigMgr->GetIntDefault("Network.Threads", 1);
-    if (networkThreads <= 0)
-    {
-        TC_LOG_ERROR(LOG_FILTER_GENERAL, "Network.Threads must be greater than 0");
-        return false;
-    }
-
-    sWorldSocketMgr.StartNetwork(_ioService, worldListener, worldPort, networkThreads);
+    sWorldSocketMgr.StartNetwork(std::move(listeners), networkThreads);
     // Set server online (allow connecting now)
     LoginDatabase.DirectPExecute("UPDATE realmlist SET flag = flag & ~%u, population = 0 WHERE id = '%u'", REALM_FLAG_OFFLINE, realm.Id.Realm);
     realm.PopulationLevel = 0.0f;
@@ -720,127 +719,60 @@ AsyncAcceptor* StartRaSocketAcceptor(boost::asio::io_service& ioService)
     return acceptor;
 }
 
+template<class Pool>
+static bool OpenConfiguredDatabase(Pool& pool, std::string const& name, int defaultSynchThreads)
+{
+    std::string const info = sConfigMgr->GetStringDefault(name + "Info", "");
+    if (info.empty())
+    {
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "%sInfo is missing", name.c_str());
+        return false;
+    }
+
+    int const workers = sConfigMgr->GetIntDefault(name + ".WorkerThreads", 1);
+    int const synchronous = sConfigMgr->GetIntDefault(name + ".SynchThreads", defaultSynchThreads);
+    if (workers < 1 || workers > 32 || synchronous < 1 || synchronous > 255)
+    {
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "%s requires 1-32 WorkerThreads and 1-255 SynchThreads (got %d and %d)",
+            name.c_str(), workers, synchronous);
+        return false;
+    }
+
+    if (!pool.Open(info, uint8(workers), uint8(synchronous)))
+    {
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Could not open %s; check its connection settings and SQL log", name.c_str());
+        return false;
+    }
+    return true;
+}
+
 /// Initialize connection to the databases
 bool StartDB()
 {
     MySQL::Library_Init();
 
-    std::string dbString = sConfigMgr->GetStringDefault("WorldDatabaseInfo", "");
-    if (dbString.empty())
+    if (!OpenConfiguredDatabase(WorldDatabase, "WorldDatabase", 1) ||
+        !OpenConfiguredDatabase(CharacterDatabase, "CharacterDatabase", 2) ||
+        !OpenConfiguredDatabase(LoginDatabase, "LoginDatabase", 1) ||
+        !RealmList::ValidateFelsoriaRealmData() ||
+        !OpenConfiguredDatabase(HotfixDatabase, "HotfixDatabase", 1))
+        return false;
+
+    int const configuredRealm = sConfigMgr->GetIntDefault("RealmID", 0);
+    if (configuredRealm < 1)
     {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "World database not specified in configuration file");
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "RealmID must be positive (got %d)", configuredRealm);
         return false;
     }
-
-    uint8 asyncThreads = uint8(sConfigMgr->GetIntDefault("WorldDatabase.WorkerThreads", 1));
-    if (asyncThreads < 1 || asyncThreads > 32)
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "World database: invalid number of worker threads specified. "
-            "Please pick a value between 1 and 32.");
-        return false;
-    }
-
-    uint8 synchThreads = uint8(sConfigMgr->GetIntDefault("WorldDatabase.SynchThreads", 1));
-    ///- Initialize the world database
-    if (!WorldDatabase.Open(dbString, asyncThreads, synchThreads))
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Cannot connect to world database %s", dbString.c_str());
-        return false;
-    }
-
-    ///- Get character database info from configuration file
-    dbString = sConfigMgr->GetStringDefault("CharacterDatabaseInfo", "");
-    if (dbString.empty())
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Character database not specified in configuration file");
-        return false;
-    }
-
-    asyncThreads = uint8(sConfigMgr->GetIntDefault("CharacterDatabase.WorkerThreads", 1));
-    if (asyncThreads < 1 || asyncThreads > 32)
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Character database: invalid number of worker threads specified. "
-            "Please pick a value between 1 and 32.");
-        return false;
-    }
-
-    synchThreads = uint8(sConfigMgr->GetIntDefault("CharacterDatabase.SynchThreads", 2));
-
-    ///- Initialize the Character database
-    if (!CharacterDatabase.Open(dbString, asyncThreads, synchThreads))
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Cannot connect to Character database %s", dbString.c_str());
-        return false;
-    }
-
-    ///- Get login database info from configuration file
-    dbString = sConfigMgr->GetStringDefault("LoginDatabaseInfo", "");
-    if (dbString.empty())
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Login database not specified in configuration file");
-        return false;
-    }
-
-    asyncThreads = uint8(sConfigMgr->GetIntDefault("LoginDatabase.WorkerThreads", 1));
-    if (asyncThreads < 1 || asyncThreads > 32)
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Login database: invalid number of worker threads specified. "
-            "Please pick a value between 1 and 32.");
-        return false;
-    }
-
-    synchThreads = uint8(sConfigMgr->GetIntDefault("LoginDatabase.SynchThreads", 1));
-    ///- Initialise the login database
-    if (!LoginDatabase.Open(dbString, asyncThreads, synchThreads))
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Cannot connect to login database %s", dbString.c_str());
-        return false;
-    }
-
-    if (!RealmList::ValidateFelsoriaRealmData())
-    {
-        StopDB();
-        return false;
-    }
-
-    dbString = sConfigMgr->GetStringDefault("HotfixDatabaseInfo", "");
-    if (dbString.empty())
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Hotfix database not specified in configuration file");
-        return false;
-    }
-
-    asyncThreads = uint8(sConfigMgr->GetIntDefault("HotfixDatabase.WorkerThreads", 1));
-    if (asyncThreads < 1 || asyncThreads > 32)
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Hotfix database: invalid number of worker threads specified. "
-            "Please pick a value between 1 and 32.");
-        return false;
-    }
-
-    synchThreads = uint8(sConfigMgr->GetIntDefault("HotfixDatabase.SynchThreads", 1));
-    if (!HotfixDatabase.Open(dbString, asyncThreads, synchThreads))
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Cannot connect to world database %s", dbString.c_str());
-        return false;
-    }
-
-    dbString = sConfigMgr->GetStringDefault("HotfixDatabaseInfo", "");
-    if (dbString.empty())
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Hotfix database not specified in configuration file");
-        return false;
-    }
-
-    ///- Get the realm Id from the configuration file
-    realm.Id.Realm = sConfigMgr->GetIntDefault("RealmID", 0);
-    if (!realm.Id.Realm)
-    {
-        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Realm ID not defined in configuration file");
-        return false;
-    }
+    realm.Id.Realm = uint32(configuredRealm);
 
     TC_LOG_INFO(LOG_FILTER_WORLDSERVER, "Realm running as realm ID %u", realm.Id.Realm);
+
+    if (!LoadRealmInfo())
+    {
+        TC_LOG_ERROR(LOG_FILTER_WORLDSERVER, "Cannot load the configured RealmID %u from realmlist", realm.Id.Realm);
+        return false;
+    }
 
     ///- Clean the database before starting
     ClearOnlineAccounts();
@@ -860,6 +792,7 @@ bool StartDB()
 
 void StopDB()
 {
+    HotfixDatabase.Close();
     CharacterDatabase.Close();
     WorldDatabase.Close();
     LoginDatabase.Close();

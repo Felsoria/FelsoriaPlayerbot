@@ -39,6 +39,16 @@ public:
 
     static WorldSocketMgr& Instance();
 
+    struct Listeners
+    {
+        std::unique_ptr<AsyncAcceptor> world;
+        std::unique_ptr<AsyncAcceptor> instance;
+    };
+
+    bool BindListeners(boost::asio::io_service& service, std::string const& bindIp, int32 worldPort,
+        int32 instancePort, int threadCount, Listeners& listeners);
+    void StartNetwork(Listeners listeners, int threadCount);
+
     /// Start network, listen at address:port .
     bool StartNetwork(boost::asio::io_service& service, std::string const& bindIp, uint16 port, int networkThreads) override;
 
