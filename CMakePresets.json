@@ -1,0 +1,47 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 31,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "developer-v2",
+      "displayName": "Felsoria Developer V2 (Windows x64)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "toolset": "v143",
+      "binaryDir": "${sourceDir}/build/developer-v2",
+      "cacheVariables": {
+        "SERVERS": true,
+        "SCRIPTS": true,
+        "TOOLS": true,
+        "WEB_API": false,
+        "USE_COREPCH": true,
+        "USE_SCRIPTPCH": true,
+        "NOPCH": false,
+        "WITH_COREDEBUG": false,
+        "FELSORIA_OPENSSL_VERSION": "3.5.1",
+        "OPENSSL_USE_STATIC_LIBS": false,
+        "OPENSSL_MSVC_STATIC_RT": false
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "developer-v2",
+      "configurePreset": "developer-v2",
+      "configuration": "RelWithDebInfo",
+      "jobs": 2,
+      "targets": [
+        "bnetserver",
+        "worldserver",
+        "mapextractor",
+        "vmap4extractor",
+        "vmap4assembler",
+        "mmaps_generator"
+      ]
+    }
+  ]
+}

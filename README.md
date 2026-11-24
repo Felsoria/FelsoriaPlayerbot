@@ -25,7 +25,7 @@ A manual Windows installation at that revision also created a character and ente
 
 ## 1. Build on Windows
 
-Install Visual Studio 2022 with **Desktop development with C++** and the x64 v143 toolset, CMake 3.31, Boost 1.78.0, the x64 OpenSSL 3 development libraries, and the MySQL x64 C client headers and library. The Windows CI uses the MySQL 8.4 client SDK and runs the login test against MySQL Server 5.7.44.
+The Developer V2 profile uses Visual Studio 2022 with **Desktop development with C++** (x64 v143), CMake 3.31, Boost 1.78.0, MySQL 5.7.44 x64 C client SDK, and OpenSSL 3.5.1 x64 development libraries. GitHub Actions builds and tests the same profile. [Windows checks](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml)
 
 Clone into a new folder. For a tagged release, check out its tag before building.
 
@@ -35,35 +35,27 @@ git clone https://github.com/Felsoria/felsoria-source.git D:\Felsoria-Local\sour
 Set-Location D:\Felsoria-Local\source
 ```
 
-Run `bootstrap.bat` from the Boost directory in the VS2022 x64 developer shell. Then build the six static Boost libraries with the shared MSVC runtime. Their output is in `stage/lib`.
+Install the x64 Boost libraries once. If you have the Boost source archive, run `bootstrap.bat` from the Boost directory in the VS2022 x64 developer shell, then run the command below. The static libraries with the shared MSVC runtime go to `stage/lib`.
 
 ```powershell
 .\b2.exe toolset=msvc-14.3 address-model=64 link=static runtime-link=shared threading=multi variant=release --layout=versioned --with-system --with-filesystem --with-thread --with-program_options --with-iostreams --with-regex stage
 ```
 
-Open PowerShell in the repository root and set the paths to your installed dependencies. `MYSQL_INCLUDE_DIR` must contain `mysql.h` and `MYSQL_LIBRARY` must point to `libmysql.lib`.
+Run this from the repository root in Windows PowerShell 5.1 or PowerShell 7. It discovers the Developer folders on `D:` and uses the default Boost library layouts, including `stage/lib`.
 
 ```powershell
-$boostRoot = 'D:\Dependencies\boost_1_78_0'
-$boostLib = Join-Path $boostRoot 'stage\lib'
-$opensslRoot = 'D:\OpenSSL-Win64'
-$mysqlSdk = 'D:\Dependencies\mysql-8.4'
-$mysqlInclude = Join-Path $mysqlSdk 'include'
-$mysqlLib = Join-Path $mysqlSdk 'lib\libmysql.lib'
-
-cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DTOOLS=ON `
-  "-DBOOST_ROOT:PATH=$boostRoot" "-DBOOST_LIBRARYDIR:PATH=$boostLib" `
-  "-DOPENSSL_ROOT_DIR=$opensslRoot" "-DMYSQL_INCLUDE_DIR=$mysqlInclude" "-DMYSQL_LIBRARY=$mysqlLib"
+.\Build-Felsoria.ps1
 ```
 
-After CMake configures successfully, build the two servers and four tools.
+For other dependency locations, pass the full paths. `-BoostLibraryDir` is optional when the library folder is in one of the documented layouts. The MySQL root contains `include/mysql.h`, `lib/libmysql.lib`, and `lib/libmysql.dll`. The OpenSSL root contains the development headers and import libraries, with the x64 runtime DLLs in `bin`.
 
 ```powershell
-cmake --build build --config RelWithDebInfo --parallel 2 --target `
-  bnetserver worldserver mapextractor vmap4extractor vmap4assembler mmaps_generator
+.\Build-Felsoria.ps1 -BoostRoot 'D:\Dependencies\boost_1_78_0' `
+  -BoostLibraryDir 'D:\Dependencies\boost_1_78_0\stage\lib' `
+  -MySqlRoot 'D:\Dependencies\mysql-5.7.44-winx64' -OpenSslRoot 'D:\OpenSSL-Win64'
 ```
 
-Find the executables and server configuration templates in `build/bin/RelWithDebInfo/`. Make the matching x64 OpenSSL and MySQL runtime DLLs available beside the executables or on `PATH`.
+Find the two servers, four data tools, configuration templates, and matching MySQL and OpenSSL DLLs in `build/developer-v2/bin/RelWithDebInfo/`. The build uses `RelWithDebInfo` with the game scripts enabled. A separate CMake build can include the WebAPI target with `-DTOOLS=ON -DWEB_API=ON`.
 
 ## 2. Import the database package
 
@@ -89,7 +81,7 @@ Use game data from Legion 7.3.5 build **26972**. If you have a compatible extrac
 
 If you need to extract data, use the tools in this order.
 
-1. Create the data directory and copy `build/src/tools/map_extractor/FelsoriaDB2Files.txt` into it. Run `mapextractor.exe -e 2 -i <client-directory> -o <data-directory> -l enUS`. Pass the game directory containing `Data` and select a locale present in that client. Check the printed `copied`, `missing`, and `failed` totals and `DB2Extraction-<locale>.csv` before using the output. For `enUS`, set `DBC.Locale = 0`.
+1. Create the data directory and copy `build/developer-v2/src/tools/map_extractor/FelsoriaDB2Files.txt` into it. Run `mapextractor.exe -e 2 -i <client-directory> -o <data-directory> -l enUS`. Pass the game directory containing `Data` and select a locale present in that client. Check the printed `copied`, `missing`, and `failed` totals and `DB2Extraction-<locale>.csv` before using the output. For `enUS`, set `DBC.Locale = 0`.
 2. For terrain and collision data, prepare loose files from the same client with their original paths. Map conversion needs `World/Maps`, `DBFilesClient/Map.db2`, and `DBFilesClient/LiquidType.db2`. Vmap conversion also needs the loose models, `GameObjectDisplayInfo.db2`, and a tool-compatible legacy `FileDataComplete.dbc`.
 3. Run `mapextractor.exe -e 1 -i <unpacked-directory> -o <data-directory>`. In the data directory containing `wmo_list.txt`, run `vmap4extractor.exe -d <unpacked-directory>` and then `vmap4assembler.exe Buildings vmaps`.
 4. From the same data directory, create `mmaps` and run `mmaps_generator.exe`. Supply the required `gt` files from the game data.

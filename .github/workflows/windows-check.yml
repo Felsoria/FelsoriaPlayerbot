@@ -9,7 +9,7 @@ permissions:
 jobs:
   vs2022:
     runs-on: windows-2022
-    timeout-minutes: 85
+    timeout-minutes: 100
     defaults:
       run:
         shell: pwsh
@@ -46,27 +46,76 @@ jobs:
           } finally {
             Pop-Location
           }
-          "FELSORIA_CI_BOOST=$boost" >> $env:GITHUB_ENV
+          "BOOST_ROOT=$boost" >> $env:GITHUB_ENV
+          "BOOST_LIBRARYDIR=$(Join-Path $env:RUNNER_TEMP 'Boost libraries')" >> $env:GITHUB_ENV
 
-      - name: Configure the clean source
+      - name: Prepare MySQL 5.7.44 x64
         run: |
-          $ErrorActionPreference = 'Stop'
-          $openssl = Join-Path $env:ProgramFiles 'OpenSSL'
-          $mysql = Split-Path (Split-Path (Get-Command mysql.exe -ErrorAction Stop).Source)
-          $mysqlInclude = Join-Path $mysql 'include'
-          $mysqlLibrary = Join-Path $mysql 'lib\libmysql.lib'
-          if (!(Test-Path (Join-Path $mysqlInclude 'mysql.h')) -or !(Test-Path $mysqlLibrary)) {
-            throw "The MySQL installation at $mysql lacks C client headers or libmysql.lib."
-          }
+          $archive = Join-Path $env:RUNNER_TEMP 'felsoria-mysql-5.7.44-winx64.zip'
+          curl.exe --fail --location --retry 3 --output $archive https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'MySQL archive download failed.' }
+          7z.exe x $archive "-o$env:RUNNER_TEMP" -y -bso0 'mysql-5.7.44-winx64\bin\mysqld.exe' 'mysql-5.7.44-winx64\bin\mysql.exe' 'mysql-5.7.44-winx64\include\*' 'mysql-5.7.44-winx64\lib\*' 'mysql-5.7.44-winx64\share\*'
+          if ($LASTEXITCODE -ne 0) { throw 'MySQL SDK and server extraction failed.' }
+          "MYSQL_ROOT=$(Join-Path $env:RUNNER_TEMP 'mysql-5.7.44-winx64')" >> $env:GITHUB_ENV
 
+      - name: Prepare OpenSSL 3.5.1 x64
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'openssl-3.5.1.tar.gz'
+          curl.exe --fail --location --retry 3 --output $archive https://github.com/openssl/openssl/releases/download/openssl-3.5.1/openssl-3.5.1.tar.gz
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL download failed.' }
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '529043b15cffa5f36077a4d0af83f3de399807181d607441d734196d889b641f') {
+            throw 'OpenSSL archive checksum mismatch.'
+          }
+          tar.exe -xzf $archive -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL extraction failed.' }
+
+          $nasmArchive = Join-Path $env:RUNNER_TEMP 'nasm-2.16.03-win64.zip'
+          $nasmUrl = 'https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip'
+          curl.exe --fail --location --retry 3 --output $nasmArchive $nasmUrl
+          if ($LASTEXITCODE -ne 0) {
+            curl.exe --fail --location --retry 3 --output $nasmArchive https://vcpkg.github.io/assets/nasm/nasm-2.16.03-win64.zip
+            if ($LASTEXITCODE -ne 0) { throw 'NASM download failed.' }
+          }
+          if ((Get-FileHash -LiteralPath $nasmArchive -Algorithm SHA512).Hash -ne '22869ceb70ea0e6597fe06abe205b5d5dd66b41fe54dda73d338c488ba6ef13a39158f25b357616bf578752bb112869ef26ad897eb29352e85cf1ecc61a7c07a') {
+            throw 'NASM archive checksum mismatch.'
+          }
+          $nasmDir = Join-Path $env:RUNNER_TEMP 'nasm'
+          Expand-Archive -LiteralPath $nasmArchive -DestinationPath $nasmDir
+          $nasm = Get-ChildItem -LiteralPath $nasmDir -Recurse -Filter nasm.exe -File | Select-Object -First 1
+          if (!$nasm) { throw 'NASM executable missing.' }
+          $env:Path = "$($nasm.DirectoryName);$env:Path"
+
+          $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'Visual Studio 2022 with MSVC was not found.' }
+          & (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+
+          $sdk = Join-Path $env:RUNNER_TEMP 'openssl-3.5.1-sdk'
+          Push-Location (Join-Path $env:RUNNER_TEMP 'openssl-3.5.1')
+          try {
+            perl.exe Configure VC-WIN64A no-tests no-makedepend "--prefix=$sdk" "--openssldir=$sdk\ssl"
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL configuration failed.' }
+            nmake.exe
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL build failed.' }
+            nmake.exe install_sw install_ssldirs
+            if ($LASTEXITCODE -ne 0) { throw 'OpenSSL SDK installation failed.' }
+          } finally {
+            Pop-Location
+          }
+          $version = & (Join-Path $sdk 'bin\openssl.exe') version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^OpenSSL 3\.5\.1\b') {
+            throw "OpenSSL SDK version differs: $version"
+          }
+          "OPENSSL_ROOT_DIR=$sdk" >> $env:GITHUB_ENV
+
+      - name: Configure the Developer V2 profile
+        shell: powershell
+        run: |
           Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.cert.pem' -Value 'test public certificate'
           Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.key.pem' -Value 'test private key sentinel'
           cmake --version
-          $boostLibraries = Join-Path $env:RUNNER_TEMP 'Boost libraries'
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DTOOLS=ON "-DCMAKE_INSTALL_PREFIX=$env:RUNNER_TEMP/felsoria-install" "-DBOOST_ROOT:PATH=$env:FELSORIA_CI_BOOST" "-DBOOST_LIBRARYDIR:PATH=$boostLibraries" "-DOPENSSL_ROOT_DIR=$openssl" "-DMYSQL_INCLUDE_DIR=$mysqlInclude" "-DMYSQL_LIBRARY=$mysqlLibrary"
-          if ($LASTEXITCODE -ne 0) { throw 'Felsoria CMake configuration failed.' }
-
-          $manifest = Get-Content 'build\src\tools\map_extractor\FelsoriaDB2Files.txt'
+          .\Build-Felsoria.ps1 -ConfigureOnly -InstallPrefix (Join-Path $env:RUNNER_TEMP 'felsoria-install')
+          $manifest = Get-Content 'build\developer-v2\src\tools\map_extractor\FelsoriaDB2Files.txt'
           if ($manifest.Count -ne 604 -or ($manifest | Sort-Object -Unique).Count -ne 604) {
             throw "Expected 604 unique DB2 filenames, got $($manifest.Count)."
           }
@@ -74,17 +123,17 @@ jobs:
 
       - name: Compile Battle.net and data tools
         run: |
-          cmake --build build --config RelWithDebInfo --parallel 2 --target bnetserver mapextractor vmap4extractor vmap4assembler mmaps_generator
+          cmake --build --preset developer-v2 --target bnetserver mapextractor vmap4extractor vmap4assembler mmaps_generator
           if ($LASTEXITCODE -ne 0) { throw 'Battle.net and data tool build failed.' }
-          $bin = 'build\bin\RelWithDebInfo'
+          $bin = 'build\developer-v2\bin\RelWithDebInfo'
           if (!(Test-Path "$bin\bnetserver.cert.pem") -or (Test-Path "$bin\bnetserver.key.pem")) {
             throw 'The build must copy only the public certificate.'
           }
 
       - name: Verify VMAP extraction of a sparse map
         run: |
-          $env:Path = "$env:ProgramFiles\OpenSSL\bin;$env:Path"
-          python .github/scripts/verify-vmap.py build/bin/RelWithDebInfo/vmap4extractor.exe
+          $env:Path = "$env:OPENSSL_ROOT_DIR\bin;$env:Path"
+          python .github/scripts/verify-vmap.py build/developer-v2/bin/RelWithDebInfo/vmap4extractor.exe
           if ($LASTEXITCODE -ne 0) { throw 'VMAP regression test failed.' }
 
       - uses: actions/download-artifact@v8.0.2
@@ -95,23 +144,17 @@ jobs:
       - name: Verify fresh import and Battle.net startup on loopback
         run: |
           $ErrorActionPreference = 'Stop'
-          $base = Join-Path $env:RUNNER_TEMP 'mysql-5.7.44-winx64'
-          $archive = Join-Path $env:RUNNER_TEMP 'felsoria-mysql-5.7.44-winx64.zip'
+          $base = $env:MYSQL_ROOT
           $work = Join-Path $env:RUNNER_TEMP 'FelsoriaAuthSmoke'
           $sql = Join-Path $env:RUNNER_TEMP 'FelsoriaSqlLoginTest'
           $sqlZip = Join-Path $sql "Felsoria-Developer-V2-SQL-$($env:GITHUB_SHA.Substring(0, 12)).zip"
           $sqlHash = (Get-FileHash -LiteralPath $sqlZip -Algorithm SHA256).Hash
 
-          curl.exe --fail --location --retry 3 --output $archive https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip
-          if ($LASTEXITCODE -ne 0) { throw 'MySQL archive download failed.' }
-          7z.exe x $archive "-o$env:RUNNER_TEMP" -y -bso0 'mysql-5.7.44-winx64\bin\mysqld.exe' 'mysql-5.7.44-winx64\bin\mysql.exe' 'mysql-5.7.44-winx64\lib\*' 'mysql-5.7.44-winx64\share\*'
-          if ($LASTEXITCODE -ne 0) { throw 'MySQL extraction failed.' }
-
-          $sdk = Split-Path (Split-Path (Get-Command mysql.exe).Source)
-          $opensslDir = Join-Path $env:ProgramFiles 'OpenSSL\bin'
-          $env:Path = "$opensslDir;$sdk\lib;$env:Path"
+          $opensslDir = Join-Path $env:OPENSSL_ROOT_DIR 'bin'
+          $env:Path = "$opensslDir;$base\lib;$env:Path"
+          $env:OPENSSL_CONF = Join-Path $env:OPENSSL_ROOT_DIR 'ssl/openssl.cnf'
           $openssl = Join-Path $opensslDir 'openssl.exe'
-          $exeDir = (Resolve-Path 'build\bin\RelWithDebInfo').Path
+          $exeDir = (Resolve-Path 'build\developer-v2\bin\RelWithDebInfo').Path
           $mysqld = Join-Path $base 'bin\mysqld.exe'
           $mysql = Join-Path $base 'bin\mysql.exe'
           $data = Join-Path $work 'mysql-data'
@@ -223,6 +266,11 @@ jobs:
             }
             if (($listeners.LocalPort | Sort-Object -Unique).Count -ne 2) { throw 'Battle.net did not open both loopback ports.' }
 
+            $loadedLibraries = (Get-Process -Id $bnetProc.Id -Module).FileName
+            foreach ($library in "$base\lib\libmysql.dll", "$opensslDir\libssl-3-x64.dll", "$opensslDir\libcrypto-3-x64.dll") {
+              if ($library -notin $loadedLibraries) { throw "Battle.net did not load the Developer-profile library: $library" }
+            }
+
             $url = "https://127.0.0.1:$restPort/bnetserver/login/"
             $form = Invoke-WebRequest -Uri $url -SkipCertificateCheck -TimeoutSec 10
             if ($form.StatusCode -ne 200 -or $form.Content -notmatch 'account_name') { throw 'Battle.net login form did not respond.' }
@@ -255,14 +303,23 @@ jobs:
             }
           }
 
-      - name: Compile worldserver and verify the Battle.net install
+      - name: Run the complete Windows build and verify installation
+        shell: powershell
         run: |
-          cmake --build build --config RelWithDebInfo --parallel 2 --target worldserver
-          if ($LASTEXITCODE -ne 0) { throw 'Worldserver build failed.' }
-          cmake -DCMAKE_INSTALL_CONFIG_NAME=RelWithDebInfo -P build/src/server/bnetserver/cmake_install.cmake
-          if ($LASTEXITCODE -ne 0) { throw 'Battle.net installation failed.' }
           $install = Join-Path $env:RUNNER_TEMP 'felsoria-install'
-          $files = Get-ChildItem -LiteralPath $install -Recurse -File
-          if ('bnetserver.exe' -notin $files.Name -or 'bnetserver.cert.pem' -notin $files.Name -or 'bnetserver.key.pem' -in $files.Name) {
-            throw 'The install must copy only the public certificate.'
+          .\Build-Felsoria.ps1 -InstallPrefix $install
+          $bin = 'build\developer-v2\bin\RelWithDebInfo'
+          $profile = Get-Content CMakePresets.json -Raw | ConvertFrom-Json
+          $exeNames = @($profile.buildPresets.targets | ForEach-Object { "$_.exe" })
+          $runtimeNames = 'libmysql.dll', 'libssl-3-x64.dll', 'libcrypto-3-x64.dll'
+          foreach ($file in ($exeNames + $runtimeNames)) {
+            if (!(Test-Path -LiteralPath (Join-Path $bin $file) -PathType Leaf)) { throw "Build output missing: $file" }
+          }
+          cmake --install build/developer-v2 --config RelWithDebInfo
+          if ($LASTEXITCODE -ne 0) { throw 'Felsoria installation failed.' }
+          foreach ($file in ($exeNames + 'bnetserver.cert.pem')) {
+            if (!(Test-Path -LiteralPath (Join-Path $install $file) -PathType Leaf)) { throw "Install output missing: $file" }
+          }
+          if (Get-ChildItem -LiteralPath $install -Recurse -Filter bnetserver.key.pem -File) {
+            throw 'The installed files include a private TLS key.'
           }
