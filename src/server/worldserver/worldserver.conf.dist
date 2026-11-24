@@ -3006,6 +3006,16 @@ Felsoria.VirtualRealms.BotRealms.Enable = 1
 Felsoria.VirtualRealms.RussianBotNames.Enable = 1
 Felsoria.Battleground.LanguageTeams.Enable = 1
 
+# Regional guilds and chat use the static seed catalogs from the characters database.
+Felsoria.RegionalGuild.Enable = 1
+Felsoria.BotChat.Enable = 1
+Felsoria.BotChat.GeneralIntervalSeconds = 12
+Felsoria.BotChat.PartyIntervalSeconds = 20
+Felsoria.BotChat.InstanceIntervalSeconds = 20
+Felsoria.BotChat.BattlegroundIntervalSeconds = 18
+Felsoria.BotChat.DialogueFile = "./Felsoria/BotChat-V5.tsv"
+Felsoria.BotChat.FullTexts.File = "./Felsoria/BotTexts-V3.tsv"
+
 # Provision bots on demand, with a separate reserve for dungeons and battlegrounds.
 LegionForge.DynamicBots.Enable = 1
 LegionForge.DynamicBots.WorldLimit = 50

@@ -31,3 +31,7 @@ add_subdirectory(bnetserver)
 add_subdirectory(game)
 add_subdirectory(scripts)
 add_subdirectory(worldserver)
+
+if(WIN32 AND FELSORIA_WINDOWS_RUNTIME_FILES)
+  install(FILES ${FELSORIA_WINDOWS_RUNTIME_FILES} DESTINATION .)
+endif()

@@ -82,6 +82,7 @@ $configure = @(
     '--preset', $preset, '-UOPENSSL_*', '-U_OPENSSL_*', '-UBoost_*', '-U_Boost_*',
     "-DBOOST_ROOT:PATH=$BoostRoot", "-DBOOST_LIBRARYDIR:PATH=$BoostLibraryDir",
     "-DOPENSSL_ROOT_DIR:PATH=$OpenSslRoot",
+    "-DFELSORIA_WINDOWS_RUNTIME_FILES:STRING=$(($runtime -join ';').Replace('\', '/'))",
     "-DMYSQL_INCLUDE_DIR:PATH=$mysqlInclude", "-DMYSQL_LIBRARY:FILEPATH=$mysqlLibrary"
 )
 if ($InstallPrefix) {
