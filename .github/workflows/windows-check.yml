@@ -109,6 +109,7 @@ jobs:
           "OPENSSL_ROOT_DIR=$sdk" >> $env:GITHUB_ENV
 
       - name: Configure the Developer V2 profile
+        shell: powershell
         run: |
           Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.cert.pem' -Value 'test public certificate'
           Set-Content -LiteralPath 'src\server\bnetserver\bnetserver.key.pem' -Value 'test private key sentinel'
@@ -303,6 +304,7 @@ jobs:
           }
 
       - name: Run the complete Windows build and verify installation
+        shell: powershell
         run: |
           $install = Join-Path $env:RUNNER_TEMP 'felsoria-install'
           .\Build-Felsoria.ps1 -InstallPrefix $install
