@@ -97,6 +97,28 @@ elseif( WIN32 )
   install(FILES worldserver.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
+# Ship the dialogue data beside worldserver, including data-only rebuilds.
+set(bot_catalogs
+  "${CMAKE_SOURCE_DIR}/Data/Felsoria/BotChat-V5.tsv"
+  "${CMAKE_SOURCE_DIR}/Data/Felsoria/BotTexts-V3.tsv")
+set(bot_output "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+if(NOT bot_output)
+  set(bot_output "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+if(CMAKE_CONFIGURATION_TYPES)
+  set(bot_output "${bot_output}/$<CONFIG>")
+endif()
+add_custom_target(felsoria_bot_catalogs
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${bot_output}/Felsoria"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${bot_catalogs} "${bot_output}/Felsoria"
+  VERBATIM)
+add_dependencies(worldserver felsoria_bot_catalogs)
+if(WIN32)
+  install(FILES ${bot_catalogs} DESTINATION Felsoria)
+else()
+  install(FILES ${bot_catalogs} DESTINATION bin/Felsoria)
+endif()
+
 # Generate precompiled header
 if( USE_COREPCH )
   add_cxx_pch(worldserver ${PRIVATE_PCH_HEADER} ${PRIVATE_PCH_SOURCE})

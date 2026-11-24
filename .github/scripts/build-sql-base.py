@@ -130,6 +130,28 @@ def check_virtual_realms(container):
     print(f"Verified {visible} visible realms, the tournament entry and {names} unassigned Cyrillic bot names.", flush=True)
 
 
+def check_regional_catalogs(container):
+    sql = """
+        SELECT
+          (SELECT COUNT(*) FROM felsoria_rg_account WHERE account_id=0 AND state=0),
+          (SELECT COUNT(*) FROM felsoria_rg_guild g JOIN felsoria_rg_account a
+           ON a.account_key=g.account_key AND a.account_name=g.account_name
+           AND a.locale_id=g.locale_id AND a.faction=g.faction
+           WHERE g.account_id=0 AND g.leader_guid=0 AND g.guild_id=0),
+          (SELECT COUNT(*) FROM (SELECT locale_id FROM felsoria_bc_phrase
+           WHERE locale_id BETWEEN 0 AND 5 AND content_hash=SHA2(text,256)
+           GROUP BY locale_id HAVING COUNT(*)=225) locales),
+          (SELECT COUNT(*) FROM felsoria_bc_dialogue WHERE enabled=1),
+          (SELECT COUNT(*) FROM felsoria_bc_line l JOIN felsoria_bc_dialogue d USING (dialogue_id)
+           JOIN felsoria_bc_phrase p ON p.phrase_id=l.phrase_id AND p.locale_id=d.locale_id),
+          (SELECT COUNT(*) FROM felsoria_boost100_schema WHERE id=1 AND version=1)
+    """
+    result = run_mysql(container, "mysql", "--database=characters", "--batch", "--skip-column-names",
+                       f"--execute={sql}", capture_output=True, text=True)
+    if list(map(int, result.stdout.split())) != [12, 52, 6, 186, 378, 1]:
+        raise ValueError(f"Incomplete regional guild, dialogue or boost data: {result.stdout.strip()}")
+
+
 def write_archive(output, files):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".zip.part")
@@ -180,6 +202,7 @@ def build(baseline, update_dir, output, source_commit, container):
         check_empty_player_data(container)
         check_bootstrap(container)
         check_virtual_realms(container)
+        check_regional_catalogs(container)
         dumps = []
         for database in DATABASES:
             print(f"Exporting {database}", flush=True)

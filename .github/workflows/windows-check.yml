@@ -320,6 +320,17 @@ jobs:
           foreach ($file in ($exeNames + 'bnetserver.cert.pem')) {
             if (!(Test-Path -LiteralPath (Join-Path $install $file) -PathType Leaf)) { throw "Install output missing: $file" }
           }
+          foreach ($file in ($runtimeNames + 'Felsoria\BotChat-V5.tsv', 'Felsoria\BotTexts-V3.tsv')) {
+            $source = if ($file.StartsWith('Felsoria\')) { Join-Path 'Data' $file }
+                      elseif ($file -eq 'libmysql.dll') { Join-Path $env:MYSQL_ROOT "lib\$file" }
+                      else { Join-Path $env:OPENSSL_ROOT_DIR "bin\$file" }
+            $expected = (Get-FileHash -LiteralPath $source).Hash
+            foreach ($folder in $bin,$install) {
+              if ((Get-FileHash -LiteralPath (Join-Path $folder $file)).Hash -ne $expected) {
+                throw "Incorrect runtime file in ${folder}: $file"
+              }
+            }
+          }
           if (Get-ChildItem -LiteralPath $install -Recurse -Filter bnetserver.key.pem -File) {
             throw 'The installed files include a private TLS key.'
           }
