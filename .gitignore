@@ -1,6 +1,7 @@
 
 # Local Felsoria build and server files
 /.vs/
+/CMakeUserPresets.json
 /build/
 /build-*/
 /build_*/
