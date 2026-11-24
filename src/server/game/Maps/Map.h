@@ -655,7 +655,7 @@ class Map
 
         void UpdateOutdoorPvPScript();
 
-        virtual void InsureCommander(uint8 bgType) {}
+        virtual void InsureCommander(uint16 bgType) {}
         virtual void InitCommander() {}
         virtual void ResetCommander() {}
         virtual void ReadyCommander() {}

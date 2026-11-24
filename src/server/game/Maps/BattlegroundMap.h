@@ -27,7 +27,7 @@ public:
     void UpdateSessions(const uint32 diff) override;
 
     void Update(const uint32 diff) override;
-    void InsureCommander(uint8 bgType) override;
+    void InsureCommander(uint16 bgType) override;
     void InitCommander() override;
     void ResetCommander() override;
     void ReadyCommander() override;

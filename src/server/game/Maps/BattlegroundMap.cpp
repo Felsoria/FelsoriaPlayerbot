@@ -85,7 +85,7 @@ void BattlegroundMap::Update(const uint32 diff)
     // this map, waiting for TeleportTo's 100 ms event. Keep servicing the map
     // after the BG is marked for deletion or detached; only commanders stop.
     if(m_bg && !m_bg->ToBeDeleted() && IsFelsoriaNormalBFG(m_bg))
-        InsureCommander(uint8(m_bg->GetTypeID(true)));
+        InsureCommander(m_bg->GetTypeID(true));
     Map::Update(diff);
     if(!m_bg||m_bg->ToBeDeleted())return;
     if (m_pAllianceCommander)
@@ -94,13 +94,16 @@ void BattlegroundMap::Update(const uint32 diff)
         m_pHordeCommander->Update(diff);
 }
 
-void BattlegroundMap::InsureCommander(uint8 bgType)
+void BattlegroundMap::InsureCommander(uint16 bgType)
 {
     auto lifetime=LockBattlegroundLifetime();
     if(!m_bg)return;
-    // Random queue IDs do not identify the map's commander.
-    if ((IsFelsoriaNormalWSG(m_bg) || IsFelsoriaNormalAB(m_bg) || IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg)))
-        bgType = uint8(m_bg->GetTypeID(true));
+    // The random queue stores its wrapper and the selected battleground as separate IDs.
+    bool const normalRandom = bgType == MS::Battlegrounds::BattlegroundTypeId::BattlegroundRandom &&
+        !m_bg->IsArena() && !m_bg->IsRated() && !m_bg->IsWargame() && !m_bg->IsBrawl();
+    if (normalRandom || IsFelsoriaNormalWSG(m_bg) || IsFelsoriaNormalAB(m_bg) ||
+        IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg))
+        bgType = m_bg->GetTypeID(true);
 
     if (!m_pAllianceCommander)
     {
@@ -251,7 +254,7 @@ bool BattlegroundMap::AddPlayerToMap(Player* player, bool initPlayer /*= true*/)
     if (ret && player->IsPlayerBot())
     {
         if ((IsFelsoriaNormalWSG(m_bg) || IsFelsoriaNormalAB(m_bg) || IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg)))
-            InsureCommander(uint8(m_bg->GetTypeID(true)));
+            InsureCommander(m_bg->GetTypeID(true));
         if (((IsFelsoriaNormalWSG(m_bg) || IsFelsoriaNormalAB(m_bg) || IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg)) ? player->GetBGTeamId() : player->GetTeamId()) == TEAM_ALLIANCE && m_pAllianceCommander)
         {
             m_pAllianceCommander->AddPlayerBot(player, m_bg);
