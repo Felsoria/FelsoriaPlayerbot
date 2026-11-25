@@ -152,6 +152,18 @@ def check_regional_catalogs(container):
         raise ValueError(f"Incomplete regional guild, dialogue or boost data: {result.stdout.strip()}")
 
 
+def check_client_cache_versions(container):
+    result = run_mysql(
+        container, "mysql", "--database=world", "--batch", "--skip-column-names",
+        "--execute=SELECT COUNT(*), COALESCE(MIN(cache_id),0), "
+        "COALESCE(MIN(hotfix_cache_id),0) FROM version",
+        capture_output=True, text=True,
+    )
+    count, client, hotfix = map(int, result.stdout.split())
+    if not count or min(client, hotfix) < 20261110:
+        raise ValueError("The database is missing the Developer V2 client cache revision.")
+
+
 def write_archive(output, files):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".zip.part")
@@ -203,6 +215,7 @@ def build(baseline, update_dir, output, source_commit, container):
         check_bootstrap(container)
         check_virtual_realms(container)
         check_regional_catalogs(container)
+        check_client_cache_versions(container)
         dumps = []
         for database in DATABASES:
             print(f"Exporting {database}", flush=True)
@@ -235,3 +248,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -325,6 +325,17 @@ jobs:
           foreach ($file in ($exeNames + 'bnetserver.cert.pem')) {
             if (!(Test-Path -LiteralPath (Join-Path $install $file) -PathType Leaf)) { throw "Install output missing: $file" }
           }
+          $expectedProfile = @{
+            'DungeonFinder.DebugJoin' = 0; 'Battleground.CastDeserter' = 0
+            'ClientCacheVersion' = 20261110; 'HotfixCacheVersion' = 20261110
+          }
+          $installedConf = Get-Content -LiteralPath (Join-Path $install 'worldserver.conf.dist') -Raw
+          foreach ($entry in $expectedProfile.GetEnumerator()) {
+            $key = [regex]::Escape($entry.Key)
+            if ([regex]::Matches($installedConf, "(?m)^$key[ \t]*=[ \t]*$($entry.Value)[ \t]*`r?$").Count -ne 1) {
+              throw "Incorrect installed Developer profile: $($entry.Key)"
+            }
+          }
           foreach ($file in ($runtimeNames + 'Felsoria\BotChat-V5.tsv', 'Felsoria\BotTexts-V3.tsv')) {
             $source = if ($file.StartsWith('Felsoria\')) { Join-Path 'Data' $file }
                       elseif ($file -eq 'libmysql.dll') { Join-Path $env:MYSQL_ROOT "lib\$file" }
@@ -354,3 +365,4 @@ jobs:
           if (Get-ChildItem -LiteralPath $install -Recurse -Filter bnetserver.key.pem -File) {
             throw 'The installed files include a private TLS key.'
           }
+
