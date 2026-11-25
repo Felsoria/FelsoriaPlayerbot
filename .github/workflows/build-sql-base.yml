@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      BASE_TAG: database-v2-20261121
-      BASE_ASSET: Felsoria-Developer-V2-SQL-Clean-20261121.zip
+      BASE_TAG: developer-v2-fc893298792a
+      BASE_ASSET: Felsoria-Developer-V2-SQL-fc893298792a.zip
       DB_CONTAINER: felsoria-sql-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7.0.1
@@ -38,6 +38,7 @@ jobs:
         run: |
           g++ -std=c++14 -Wall -Wextra -Werror -I dep/CascLib/src .github/scripts/test-db2-extraction.cpp -o "$RUNNER_TEMP/felsoria-db2-test"
           "$RUNNER_TEMP/felsoria-db2-test" "$RUNNER_TEMP/felsoria-db2-fixtures"
+          python3 .github/scripts/test-build-sql-base.py
           python3 .github/scripts/test-publish-sql-release.py
 
       - name: Download the pinned baseline
@@ -140,4 +141,4 @@ jobs:
           python3 .github/scripts/publish-sql-release.py
           --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
           --directory "$RUNNER_TEMP/felsoria-output"
-
+          --retire-legacy-assets

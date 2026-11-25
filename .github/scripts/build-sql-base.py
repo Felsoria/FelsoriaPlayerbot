@@ -14,9 +14,10 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 
 DATABASES = ("auth", "characters", "world", "hotfixes")
-BASE_TAG = "database-v2-20261121"
-BASE_ASSET = "Felsoria-Developer-V2-SQL-Clean-20261121.zip"
-BASE_SHA256 = "f09cc8d556d49e60fc618cd5ead7fb5d41fb15adf7bd7b21c362681e9c1abbb4"
+BASE_TAG = "developer-v2-fc893298792a"
+BASE_ASSET = "Felsoria-Developer-V2-SQL-fc893298792a.zip"
+BASE_SHA256 = "16a7b8088776f8152be6f0345e9caa22b01c067fd609086f7fc9344ab3863068"
+BASE_COMMIT = "fc893298792a09cbcbc172659b717b6af6cd890d"
 MIGRATION_NAME = re.compile(r"(\d{8}_\d{3})_(auth|characters|world|hotfixes)_[a-z0-9_]+\.sql")
 DUMP_OPTIONS = (
     "--single-transaction", "--skip-lock-tables", "--quick", "--hex-blob",
@@ -42,6 +43,21 @@ def migrations(directory):
             raise ValueError(f"Duplicate migration revision: {revision}")
         found[revision] = (database, path)
     return [(revision, *found[revision]) for revision in sorted(found)]
+
+
+def migration_record(revision, database, path):
+    return {"id": revision, "database": database, "file": path.name, "sha256": digest(path)}
+
+
+def baseline_history(archive, available):
+    manifest = json.loads(archive.read("database-manifest.json"))
+    if not isinstance(manifest, dict) or manifest.get("source_commit") != BASE_COMMIT:
+        raise ValueError("The baseline manifest belongs to a different source commit.")
+    applied = manifest.get("applied_migrations")
+    expected = [migration_record(*item) for item in available]
+    if not isinstance(applied, list) or not applied or applied != expected[:len(applied)]:
+        raise ValueError("The baseline migration history is missing, reordered or modified.")
+    return list(applied), available[len(applied):]
 
 
 def run_mysql(container, program, *arguments, **streams):
@@ -181,13 +197,14 @@ def build(baseline, update_dir, output, source_commit, container):
     baseline_digest = digest(baseline)
     if baseline_digest != BASE_SHA256:
         raise ValueError("The baseline ZIP does not match its pinned SHA-256.")
-    pending = migrations(update_dir)
-    expected_files = [f"{database}.sql" for database in DATABASES]
+    available = migrations(update_dir)
+    expected_files = [f"{database}.sql" for database in DATABASES] + ["database-manifest.json"]
     with tempfile.TemporaryDirectory(prefix="felsoria-sql-") as temp_dir:
         work = Path(temp_dir)
         with ZipFile(baseline) as seed:
             if sorted(seed.namelist()) != sorted(expected_files):
-                raise ValueError("The baseline ZIP does not contain exactly the four expected dumps.")
+                raise ValueError("The baseline ZIP needs exactly four dumps and its manifest.")
+            applied, pending = baseline_history(seed, available)
             create = " ".join(
                 f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
                 for database in DATABASES
@@ -201,15 +218,11 @@ def build(baseline, update_dir, output, source_commit, container):
                 with staged.open("rb") as sql:
                     run_mysql(container, "mysql", "--binary-mode", f"--database={database}", stdin=sql)
 
-        applied = []
         for revision, database, path in pending:
             print(f"Applying {path.name} to {database}", flush=True)
-            patch_digest = digest(path)
             with path.open("rb") as sql:
                 run_mysql(container, "mysql", "--binary-mode", f"--database={database}", stdin=sql)
-            applied.append({
-                "id": revision, "database": database, "file": path.name, "sha256": patch_digest
-            })
+            applied.append(migration_record(revision, database, path))
 
         check_empty_player_data(container)
         check_bootstrap(container)
@@ -248,4 +261,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
