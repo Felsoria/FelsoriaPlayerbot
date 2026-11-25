@@ -47,7 +47,7 @@ public:
     std::unique_ptr<Battlenet::Session::AccountInfo> VerifyLoginTicket(std::string const& id);
 
 private:
-    void Run();
+    void Run(std::unique_ptr<soap> server);
 
     friend int32 handle_get_plugin(soap* soapClient);
     int32 HandleGet(soap* soapClient);

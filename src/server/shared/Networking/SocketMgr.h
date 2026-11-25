@@ -49,13 +49,7 @@ public:
             return false;
         }
 
-        _threadCount = threadCount;
-        _threads = CreateThreads();
-
-        ASSERT(_threads);
-
-        for (int32 i = 0; i < _threadCount; ++i)
-            _threads[i].Start();
+        StartWorkers(threadCount);
 
         return true;
     }
@@ -119,7 +113,18 @@ public:
     }
 
 protected:
-    SocketMgr() : _acceptor(nullptr), _threads(nullptr), _threadCount(1)
+    void StartWorkers(int threadCount)
+    {
+        _threadCount = threadCount;
+        _threads = CreateThreads();
+
+        ASSERT(_threads);
+
+        for (int32 i = 0; i < _threadCount; ++i)
+            _threads[i].Start();
+    }
+
+    SocketMgr() : _acceptor(nullptr), _threads(nullptr), _threadCount(0)
     {
     }
 

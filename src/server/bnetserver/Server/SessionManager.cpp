@@ -19,12 +19,19 @@
 
 bool Battlenet::SessionManager::StartNetwork(boost::asio::io_service& service, std::string const& bindIp, uint16 port, int threadCount)
 {
-    if (!BaseSocketMgr::StartNetwork(service, bindIp, port, threadCount))
+    auto listener = AsyncAcceptor::Bind(service, bindIp, port, "BattlenetPort", LOG_FILTER_BATTLENET);
+    if (!listener || threadCount < 1)
         return false;
+    StartNetwork(std::move(listener), threadCount);
+    return true;
+}
 
+void Battlenet::SessionManager::StartNetwork(std::unique_ptr<AsyncAcceptor> listener, int threadCount)
+{
+    _acceptor = listener.release();
+    StartWorkers(threadCount);
     _acceptor->SetSocketFactory(std::bind(&BaseSocketMgr::GetSocketForAccept, this));
     _acceptor->AsyncAcceptWithCallback<&OnSocketAccept>();
-    return true;
 }
 
 NetworkThread<Battlenet::Session>* Battlenet::SessionManager::CreateThreads() const

@@ -256,6 +256,11 @@ jobs:
             & $mysql @myArgs '--execute=UPDATE auth.felsoria_eu_legion_catalog SET enabled=1 WHERE realm_id IN (SELECT realm_id FROM auth.ci_enabled_realms)'
             if ($LASTEXITCODE -ne 0) { throw 'Could not restore the fixture catalog.' }
 
+            $testStartupFailure = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/test-startup-failure.ps1'
+            $bnetExe = Join-Path $exeDir 'bnetserver.exe'
+            & $testStartupFailure $bnetExe $work $bnetPort "Could not bind BattlenetPort at 127.0.0.1:$bnetPort" 'Bnet.log'
+            & $testStartupFailure $bnetExe $work $restPort "REST Couldn't bind to 127.0.0.1:$restPort" 'Bnet.log'
+
             $bnetProc = Start-Process -FilePath (Join-Path $exeDir 'bnetserver.exe') -WorkingDirectory $work -PassThru -RedirectStandardOutput "$work\bnet.out" -RedirectStandardError "$work\bnet.err"
             for ($attempt = 0; $attempt -lt 80; $attempt++) {
               if ($bnetProc.HasExited) { throw 'Battle.net exited before opening both ports.' }
@@ -331,6 +336,21 @@ jobs:
               }
             }
           }
+          $work = Join-Path $env:RUNNER_TEMP 'FelsoriaWorldPortSmoke'
+          New-Item -ItemType Directory -Path "$work\logs" -Force | Out-Null
+          $conf = Get-Content (Join-Path $install 'worldserver.conf.dist') -Raw
+          $conf = $conf -replace '(?m)^LogsDir[ \t]*=.*$', 'LogsDir = "./logs"'
+          $conf = $conf -replace '(?m)^BindIP[ \t]*=.*$', 'BindIP = "127.0.0.1"'
+          $conf = $conf -replace '(?m)^WorldServerPort[ \t]*=.*$', 'WorldServerPort = 38085'
+          $conf = $conf -replace '(?m)^InstanceServerPort[ \t]*=.*$', 'InstanceServerPort = 38086'
+          [IO.File]::WriteAllText((Join-Path $work 'worldserver.conf'), $conf)
+          $testStartupFailure = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/test-startup-failure.ps1'
+          $worldExe = Join-Path $install 'worldserver.exe'
+          & $testStartupFailure $worldExe $work 38085 'Could not bind WorldServerPort at 127.0.0.1:38085' 'World.log'
+          & $testStartupFailure $worldExe $work 38086 'Could not bind InstanceServerPort at 127.0.0.1:38086' 'World.log'
+          $badThreads = $conf -replace '(?m)^WorldDatabase[.]SynchThreads[ \t]*=.*$', 'WorldDatabase.SynchThreads = 0'
+          [IO.File]::WriteAllText((Join-Path $work 'worldserver.conf'), $badThreads)
+          & $testStartupFailure $worldExe $work 0 'WorldDatabase requires 1-32 WorkerThreads and 1-255 SynchThreads' 'World.log'
           if (Get-ChildItem -LiteralPath $install -Recurse -Filter bnetserver.key.pem -File) {
             throw 'The installed files include a private TLS key.'
           }

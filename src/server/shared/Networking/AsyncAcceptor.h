@@ -22,6 +22,7 @@
 #include <boost/asio.hpp>
 #include <functional>
 #include <atomic>
+#include <memory>
 
 using boost::asio::ip::tcp;
 
@@ -30,10 +31,35 @@ class AsyncAcceptor
 public:
     typedef void(*AcceptCallback)(tcp::socket&& newSocket, uint32 threadIndex);
 
-    AsyncAcceptor(boost::asio::io_service& ioService, std::string const& bindIp, uint16 port) :
-        _acceptor(ioService, tcp::endpoint(boost::asio::ip::address::from_string(bindIp), port)),
+    AsyncAcceptor(boost::asio::io_service& ioService, std::string const& bindIp, uint16 port, bool reuseAddress = true) :
+        _acceptor(ioService, tcp::endpoint(boost::asio::ip::address::from_string(bindIp), port), reuseAddress),
         _socket(ioService), _closed(false), _socketFactory(std::bind(&AsyncAcceptor::DefeaultSocketFactory, this))
     {
+    }
+
+    static std::unique_ptr<AsyncAcceptor> Bind(boost::asio::io_service& service,
+        std::string const& bindIp, int32 port, char const* setting, LogFilterType filter)
+    {
+        if (port < 1 || port > 65535)
+        {
+            TC_LOG_ERROR(filter, "%s must be in the range 1-65535 (got %d)", setting, port);
+            return nullptr;
+        }
+#ifdef _WIN32
+        // Windows SO_REUSEADDR can let a second server share a live listener.
+        bool const reuseAddress = false;
+#else
+        bool const reuseAddress = true;
+#endif
+        try
+        {
+            return std::unique_ptr<AsyncAcceptor>(new AsyncAcceptor(service, bindIp, uint16(port), reuseAddress));
+        }
+        catch (boost::system::system_error const& error)
+        {
+            TC_LOG_ERROR(filter, "Could not bind %s at %s:%d: %s", setting, bindIp.c_str(), port, error.what());
+            return nullptr;
+        }
     }
 
     template<class T>

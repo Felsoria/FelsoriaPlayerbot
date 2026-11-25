@@ -152,6 +152,17 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    int const networkThreads = sConfigMgr->GetIntDefault("Network.Threads", 1);
+    if (networkThreads <= 0)
+    {
+        TC_LOG_ERROR(LOG_FILTER_GENERAL, "Network.Threads must be greater than 0");
+        return 1;
+    }
+    auto listener = AsyncAcceptor::Bind(_ioService, sConfigMgr->GetStringDefault("BindIP", "0.0.0.0"),
+        sConfigMgr->GetIntDefault("BattlenetPort", 1119), "BattlenetPort", LOG_FILTER_BATTLENET);
+    if (!listener)
+        return 1;
+
     boost::asio::signal_set signals(_ioService, SIGINT, SIGTERM);
 #if PLATFORM == TC_PLATFORM_WINDOWS
     signals.add(SIGBREAK);
@@ -172,6 +183,7 @@ int main(int argc, char** argv)
     if (!StartDB())
     {
         ShutdownThreadPool(threadPool);
+        StopDB();
         return 1;
     }
 
@@ -182,22 +194,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Start the listening port (acceptor) for auth connections
-    int32 bnport = sConfigMgr->GetIntDefault("BattlenetPort", 1119);
-    if (bnport < 0 || bnport > 0xFFFF)
-    {
-        TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Specified battle.net port (%d) out of allowed range (1-65535)", bnport);
-        StopDB();
-        // delete _ioService;
-        ShutdownThreadPool(threadPool);
-        return 1;
-    }
-
     if (!sLoginService.Start(_ioService))
     {
-        StopDB();
-        // delete _ioService;
         ShutdownThreadPool(threadPool);
+        StopDB();
         TC_LOG_ERROR(LOG_FILTER_BATTLENET, "Failed to initialize login service");
         return 1;
     }
@@ -205,9 +205,9 @@ int main(int argc, char** argv)
     // FELSORIA_REALM_IP_SYNC_V4_BEGIN
     if (!FelsoriaSyncRealmAddress())
     {
+        ShutdownThreadPool(threadPool);
         sLoginService.Stop();
         StopDB();
-        ShutdownThreadPool(threadPool);
         return 1;
     }
     // FELSORIA_REALM_IP_SYNC_V4_END
@@ -215,17 +215,7 @@ int main(int argc, char** argv)
     // Get the list of realms for the server
     sRealmList->Initialize(_ioService, sConfigMgr->GetIntDefault("RealmsStateUpdateDelay", 10));
 
-    std::string bindIp = sConfigMgr->GetStringDefault("BindIP", "0.0.0.0");
-
-    int networkThreads = sConfigMgr->GetIntDefault("Network.Threads", 1);
-    if (networkThreads <= 0)
-    {
-        TC_LOG_ERROR(LOG_FILTER_GENERAL, "Network.Threads must be greater than 0");
-        return 0;
-    }
-
-    sSessionMgr.StartNetwork(_ioService, bindIp, bnport, networkThreads);
-    // sSessionMgr.StartNetwork(*_ioService, bindIp, bnport);
+    sSessionMgr.StartNetwork(std::move(listener), networkThreads);
 
     // Set process priority according to configuration settings
     SetProcessPriority("server.bnetserver");
