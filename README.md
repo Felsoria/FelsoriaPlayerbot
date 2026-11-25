@@ -11,6 +11,7 @@ Developer V2 is a development snapshot. Quest behavior, encounter mechanics, bat
 - **Dynamic world bots** spawn according to the player's zone, level, and faction territory. Bots in a player's party are kept when the surrounding bot population changes.
 - **Dungeon Finder and combat AI** cover tank, healer, and damage roles. Group AI includes tank positioning, area-effect avoidance, and logic for returning to combat after moving out of danger.
 - **Battleground AI** includes objective and navigation logic for Warsong Gulch, Arathi Basin, Alterac Valley, and the Battle for Gilneas. Gilneas has custom routes for graveyard exits and water crossings.
+- **Twin Peaks and Temple of Kotmogu** have objective commanders for normal direct and random battleground queues. Twin Peaks assigns flag pickup, return, carrier escort and interception. Kotmogu assigns one bot per free orb and moves carriers toward the highest-scoring area. Both use live battleground objects and complete navigation-mesh paths; matching extracted map data is required. Rated matches, wargames and brawls keep their existing behavior. Full-match route and graveyard behavior still need a Legion client check.
 - **Legion content fixes** include changes to Demon Hunter quest scripting and Vault of the Wardens. The source also includes a DB2 extractor with locale-specific handling.
 
 ## Verified revision
@@ -145,3 +146,4 @@ For a bug report, include the source commit, client build, database snapshot, re
 ## Credits and license
 
 Felsoria builds on LegionPlayerBot, LegionCore, and the work of TrinityCore contributors. See the source headers for copyright and attribution notices. [GNU General Public License](COPYING)
+

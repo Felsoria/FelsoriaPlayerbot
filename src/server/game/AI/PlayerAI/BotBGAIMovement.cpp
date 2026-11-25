@@ -7,6 +7,7 @@
 #include "CommandBG.h"
 #include "CommandBG/CommandAV.h"
 #include "CommandBG/CommandBFG.h"
+#include "CommandBG/CommandObjectiveBG.h"
 #include "BattlegroundWarsongGulch.h"
 #include "BattlegroundAlteracValley.h"
 #include "FelsoriaAVSafety.h"
@@ -491,6 +492,7 @@ void BotBGAIMovement::ClearMovement()
 {
     if(IsBFGJumpInProgress())return;
     m_BFGWaterActive=false;m_BFGHopActive=false;m_BFGRecoveryHop=false;m_BFGStartSettling=false;
+    m_ObjectiveMoveAt = 0; m_ObjectiveMoving = false;
     m_AVSpline=false; m_AVRecorded=false; m_AVAttemptAt=0;
     m_ABSpline=false;
     if (IsWSGDropInProgress()) return;
@@ -2760,6 +2762,9 @@ void BotBGAIMovement::MovementTo(float x, float y, float z, float offset /* = 0 
         return;
     }
 	bool result = path.CalculatePath(posx, posy, posz);
+	if (m_BGAI && CommandObjectiveBG::Supports(m_Player->GetBattleground()) &&
+	    (!result || path.GetPathType() != PATHFIND_NORMAL))
+	{ delete pathParam; m_MovementTick = 0; return; }
     // V12.1: legacy findOK may be forced true later; validate the native result first.
     if(m_GroupAI && m_Player->GetMap() && m_Player->GetMap()->IsDungeon() &&
        (!result || path.GetPathType()!=PATHFIND_NORMAL)){
@@ -2908,6 +2913,9 @@ void BotBGAIMovement::MovementTo(ObjectGuid guid, float offset /* = 0 */)
         return;
     }
 	bool result = path.CalculatePath(posx, posy, posz);
+	if (m_BGAI && CommandObjectiveBG::Supports(m_Player->GetBattleground()) &&
+	    (!result || path.GetPathType() != PATHFIND_NORMAL))
+	{ delete pathParam; m_MovementTick = 0; return; }
     // V12.1: legacy findOK may be forced true later; validate the native result first.
     if(m_GroupAI && m_Player->GetMap() && m_Player->GetMap()->IsDungeon() &&
        (!result || path.GetPathType()!=PATHFIND_NORMAL)){
@@ -2991,6 +2999,9 @@ void BotBGAIMovement::MovementToTarget()
             return;
         }
 		bool result = path.CalculatePath(posx, posy, posz);
+		if (m_BGAI && CommandObjectiveBG::Supports(m_Player->GetBattleground()) &&
+		    (!result || path.GetPathType() != PATHFIND_NORMAL))
+		{ delete pathParam; m_MovementTick = 0; return; }
     // V12.1: legacy findOK may be forced true later; validate the native result first.
     if(m_GroupAI && m_Player->GetMap() && m_Player->GetMap()->IsDungeon() &&
        (!result || path.GetPathType()!=PATHFIND_NORMAL)){
@@ -3028,6 +3039,45 @@ void BotBGAIMovement::MovementToTarget()
 		ApplyFinishPath(pathParam);
 		delete pathParam;
 	}
+}
+
+bool BotBGAIMovement::MoveObjectiveTo(Position const& goal, float stopRange)
+{
+    if (!m_BGAI || m_BGAI->IsNotSelect(m_Player) || !CommandObjectiveBG::Supports(m_Player->GetBattleground()) ||
+        !m_Player->isAlive() || m_Player->HasUnitState(UNIT_STATE_CASTING | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING) ||
+        m_Player->HasAuraWithMechanic(1 << Mechanics::MECHANIC_ROOT) || m_Player->GetTransport() ||
+        m_Player->GetVehicleBase() || m_Player->IsFlying() ||
+        m_Player->HasUnitMovementFlag(MOVEMENTFLAG_FALLING | MOVEMENTFLAG_FALLING_FAR)) return false;
+    float x = goal.GetPositionX(), y = goal.GetPositionY(), z = goal.GetPositionZ();
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+        m_Player->GetExactDist(x, y, z) <= stopRange) return false;
+    uint32 now = getMSTime();
+    if (m_ObjectiveInstance == m_Player->GetInstanceId() && m_ObjectiveMoveAt &&
+        uint32(now - m_ObjectiveMoveAt) < 1500 && m_ObjectiveGoal.GetExactDist(x, y, z) < 3.0f &&
+        (!m_ObjectiveMoving || (m_Player->movespline && !m_Player->movespline->Finalized())))
+        return m_ObjectiveMoving;
+    m_ObjectiveMoveAt = now;
+    m_ObjectiveInstance = m_Player->GetInstanceId();
+    m_ObjectiveGoal = goal;
+    m_ObjectiveMoving = false;
+    PathParameter parameters(m_Player->GetSession()->GetAccountId(), m_Player);
+    parameters.targetPosX = x; parameters.targetPosY = y; parameters.targetPosZ = z;
+    parameters.offset = 0;
+    Pathfinding path(&parameters, nullptr, nullptr);
+    if (!path.CalculatePath(x, y, z, false, false) || path.GetPathType() != PATHFIND_NORMAL ||
+        path.GetPath().size() < 2 || path.GetPath().size() > 256) return false;
+    G3D::Vector3 end = path.GetActualEndPosition();
+    if (!std::isfinite(end.x) || !std::isfinite(end.y) || !std::isfinite(end.z) ||
+        (end - G3D::Vector3(x, y, z)).squaredLength() > 4.0f ||
+        (path.GetPath().front() - m_Player->GetVector3()).squaredLength() > 9.0f) return false;
+    for (auto const& point : path.GetPath())
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) return false;
+    parameters.findOK = true;
+    parameters.finishPaths = path.GetPath();
+    parameters.destPosition = end;
+    ApplyFinishPath(&parameters);
+    m_ObjectiveMoving = true;
+    return true;
 }
 
 void BotBGAIMovement::ApplyFinishPath(PathParameter* pathParam)
@@ -3976,3 +4026,4 @@ FelsoriaGilneasRecovery::MoveResult BotBGAIMovement::MoveBFGEgressPath(
     if(ground.size()<2||!MoveBFGRecordedPath(ground))return reject("egress_ground_rejected");
     m_BFGMovementReason="egress_walk";return MoveResult::Running;
 }
+

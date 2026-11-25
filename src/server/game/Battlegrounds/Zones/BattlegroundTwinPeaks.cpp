@@ -233,7 +233,7 @@ bool BattlegroundTwinPeaks::SetupBattleground()
         if (grave)
         {
             uint8 team = i % 2; ///< If 0 team == TEAM_ALLIANCE else TEAM_HORDE
-            if (!AddSpiritGuide(team == TEAM_ALLIANCE ? TP_SPIRIT_ALLIANCE : TP_SPIRIT_HORDE, grave->Loc, TeamId(team)))
+            if (!AddSpiritGuide(i - TP_GRAVEYARD_START_ALLIANCE, grave->Loc, TeamId(team)))
             {
                 TC_LOG_ERROR(LOG_FILTER_GENERAL, "BatteGroundTP: Failed to spawn spirit guide id: %u. Battleground not created!", grave->ID);
                 return false;
@@ -359,17 +359,19 @@ void BattlegroundTwinPeaks::_CheckPositions(uint32 diff)
         if (!player)
             continue;
 
-        if (player->IsInAreaTriggerRadius(5904) && _flagState[TEAM_HORDE] && !_flagState[TEAM_ALLIANCE] && GetStatus() == STATUS_IN_PROGRESS) // Alliance Flag spawn
+        if (player->IsInAreaTriggerRadius(5904) && _flagState[TEAM_HORDE] == BG_TP_FLAG_STATE_ON_PLAYER &&
+            _flagState[TEAM_ALLIANCE] == BG_TP_FLAG_STATE_ON_BASE && _flagKeepers[TEAM_HORDE] == player->GetGUID() &&
+            GetStatus() == STATUS_IN_PROGRESS) // Alliance Flag spawn
         {
-            if (_flagKeepers[TEAM_HORDE] == player->GetGUID())
-                EventPlayerCapturedFlag(player);
+            EventPlayerCapturedFlag(player);
             break;
         }
 
-        if (player->IsInAreaTriggerRadius(5905) && _flagState[TEAM_ALLIANCE] && !_flagState[TEAM_HORDE] && GetStatus() == STATUS_IN_PROGRESS) // Horde Flag spawn
+        if (player->IsInAreaTriggerRadius(5905) && _flagState[TEAM_ALLIANCE] == BG_TP_FLAG_STATE_ON_PLAYER &&
+            _flagState[TEAM_HORDE] == BG_TP_FLAG_STATE_ON_BASE && _flagKeepers[TEAM_ALLIANCE] == player->GetGUID() &&
+            GetStatus() == STATUS_IN_PROGRESS) // Horde Flag spawn
         {
-            if (_flagKeepers[TEAM_ALLIANCE] == player->GetGUID())
-                EventPlayerCapturedFlag(player);
+            EventPlayerCapturedFlag(player);
             break;
         }
     }
@@ -682,3 +684,4 @@ void BattlegroundTwinPeaks::UpdateFlagState(uint32 team, uint32 value, ObjectGui
     _flagState[team] = value;
     _flagKeepers[team] = flagKeeperGUID;
 }
+

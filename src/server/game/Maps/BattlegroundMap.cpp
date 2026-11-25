@@ -10,6 +10,7 @@
 #include "CommandBG/CommandEY.h"
 #include "CommandBG/CommandIC.h"
 #include "CommandBG/CommandWS.h"
+#include "CommandBG/CommandObjectiveBG.h"
 
 namespace
 {
@@ -17,7 +18,8 @@ namespace
     // derived type so commanders release their route/task containers safely.
     void DestroyCommander(CommandBG*& commander)
     {
-        if(auto*p=dynamic_cast<CommandBFG*>(commander))delete p;
+        if(auto*p=dynamic_cast<CommandObjectiveBG*>(commander))delete p;
+        else if(auto*p=dynamic_cast<CommandBFG*>(commander))delete p;
         else if(auto*p=dynamic_cast<CommandAB*>(commander))delete p;
         else if(auto*p=dynamic_cast<CommandAV*>(commander))delete p;
         else if(auto*p=dynamic_cast<CommandEY*>(commander))delete p;
@@ -102,13 +104,19 @@ void BattlegroundMap::InsureCommander(uint16 bgType)
     bool const normalRandom = bgType == MS::Battlegrounds::BattlegroundTypeId::BattlegroundRandom &&
         !m_bg->IsArena() && !m_bg->IsRated() && !m_bg->IsWargame() && !m_bg->IsBrawl();
     if (normalRandom || IsFelsoriaNormalWSG(m_bg) || IsFelsoriaNormalAB(m_bg) ||
-        IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg))
+        IsFelsoriaNormalAV(m_bg) || IsFelsoriaNormalBFG(m_bg) || CommandObjectiveBG::Supports(m_bg))
         bgType = m_bg->GetTypeID(true);
 
     if (!m_pAllianceCommander)
     {
         switch (bgType)
         {
+            case MS::Battlegrounds::BattlegroundTypeId::BattlegroundTwinPeaks:
+                if (CommandObjectiveBG::Supports(m_bg)) m_pAllianceCommander = new CommandTP(m_bg, TEAM_ALLIANCE);
+                break;
+            case MS::Battlegrounds::BattlegroundTypeId::BattlegroundKotmoguTemplate:
+                if (CommandObjectiveBG::Supports(m_bg)) m_pAllianceCommander = new CommandKT(m_bg, TEAM_ALLIANCE);
+                break;
             case MS::Battlegrounds::BattlegroundTypeId::BattlegroundBattleForGilneas:
                 if(IsFelsoriaNormalBFG(m_bg)) m_pAllianceCommander = new CommandBFG(m_bg, TeamId::TEAM_ALLIANCE);
                 break;
@@ -133,6 +141,12 @@ void BattlegroundMap::InsureCommander(uint16 bgType)
     {
         switch (bgType)
         {
+            case MS::Battlegrounds::BattlegroundTypeId::BattlegroundTwinPeaks:
+                if (CommandObjectiveBG::Supports(m_bg)) m_pHordeCommander = new CommandTP(m_bg, TEAM_HORDE);
+                break;
+            case MS::Battlegrounds::BattlegroundTypeId::BattlegroundKotmoguTemplate:
+                if (CommandObjectiveBG::Supports(m_bg)) m_pHordeCommander = new CommandKT(m_bg, TEAM_HORDE);
+                break;
             case MS::Battlegrounds::BattlegroundTypeId::BattlegroundBattleForGilneas:
                 if(IsFelsoriaNormalBFG(m_bg)) m_pHordeCommander = new CommandBFG(m_bg, TeamId::TEAM_HORDE);
                 break;
@@ -332,4 +346,5 @@ void BattlegroundMap::RemoveAllPlayers()
                 player->GetGUIDLow(), GetId(), GetInstanceId());
     }
 }
+
 

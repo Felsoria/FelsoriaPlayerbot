@@ -8,6 +8,7 @@
 #include "CommandBG/CommandAB.h"
 #include "CommandBG/CommandAV.h"
 #include "CommandBG/CommandBFG.h"
+#include "CommandBG/CommandObjectiveBG.h"
 #include "Battlefield.h"
 #include "BattlefieldMgr.h"
 #include "BotBGAIMovement.h"
@@ -18,6 +19,7 @@
 #include "CreatureAI.h"
 #include "BattlegroundWarsongGulch.h"
 #include "BattlegroundTwinPeaks.h"
+#include "BattlegroundKotmoguTemplate.h"
 #include "BattlegroundEyeOfTheStorm.h"
 
 #include "BotWarriorAI.h"
@@ -402,7 +404,7 @@ void BotBGAI::BattlegroundRevive()
 	Player* player = dynamic_cast<Player*>(me);
 	if (!player || player->isAlive())
 		return;
-	CommandBG* bgCommander = player->GetMap()->GetCommander((player->GetMapId()==529 || player->GetMapId()==30 || player->GetMapId()==761) ? player->GetBGTeamId() : player->GetTeamId());
+	CommandBG* bgCommander = player->GetMap()->GetCommander((player->GetMapId()==529 || player->GetMapId()==30 || player->GetMapId()==761 || CommandObjectiveBG::Supports(player->GetBattleground())) ? player->GetBGTeamId() : player->GetTeamId());
     if(player->GetMapId()==30){
         auto*av=dynamic_cast<BattlegroundAV*>(player->GetBattleground());if(!av)return;
         uint32 now=getMSTime();if(!m_AVDeadSince)m_AVDeadSince=now?now:1;
@@ -1138,7 +1140,7 @@ bool BotBGAI::NeedDireFlee()
 	{
 		if (Map* pMap = me->GetMap())
 		{
-			if (CommandBG* bgCommander = pMap->GetCommander(me->GetTeamId()))
+			if (CommandBG* bgCommander = pMap->GetCommander(CommandObjectiveBG::Supports(me->GetBattleground()) ? me->GetBGTeamId() : me->GetTeamId()))
 			{
 				if (bgCommander->CanDireFlee())
 					m_CanDireFlee = 1;
@@ -1802,7 +1804,7 @@ void BotBGAI::UpdateBotAI(uint32 diff)
     }
     // Release dead, distant or phased targets before any PvP/maintenance
     // return can consume this update. The commander intent is kept separately.
-    if (me->GetMapId()==489 || me->GetMapId()==529 || me->GetMapId()==30 || me->GetMapId()==761) GetBotAIValidSelectedUnit();
+    if (me->GetMapId()==489 || me->GetMapId()==529 || me->GetMapId()==30 || me->GetMapId()==761 || CommandObjectiveBG::Supports(pBattleground)) GetBotAIValidSelectedUnit();
     if(me->GetMapId()==761 && bgStatus==STATUS_IN_PROGRESS)
         if(auto*commander=dynamic_cast<CommandBFG*>(me->GetMap()->GetCommander(me->GetBGTeamId()))) {
             m_AIBGStateType=BotAIBGState::AIBGState_Start;
@@ -1812,7 +1814,7 @@ void BotBGAI::UpdateBotAI(uint32 diff)
     Player* objectiveCarrier = m_Movement->GetWSGAttackCarrier();
     bool flagTask = m_Movement->HasWSGFlagTask();
     Unit* defending = nullptr;
-    if (bgStatus == STATUS_IN_PROGRESS && !IsFlagCarrier())
+    if (bgStatus == STATUS_IN_PROGRESS && !IsFlagCarrier() && !CommandObjectiveBG::Supports(pBattleground))
     {
         if (objectiveCarrier)
         {
@@ -1886,6 +1888,16 @@ void BotBGAI::UpdateBotAI(uint32 diff)
 	if (NeedWaitSpecialSpell(BOTAI_UPDATE_TICK))
 		return;
 
+    if (bgStatus == STATUS_IN_PROGRESS && CommandObjectiveBG::Supports(pBattleground))
+        if (auto* commander = dynamic_cast<CommandObjectiveBG*>(me->GetMap()->GetCommander(me->GetBGTeamId())))
+            if (commander->UpdateBot(me) || IsFlagCarrier())
+            {
+                // A carrier at its destination holds position. Legacy combat
+                // commands must not pull it out of the capture/scoring area.
+                me->AttackStop(); me->SetSelection(ObjectGuid::Empty);
+                m_PvpRotation.SelfHeal(me, m_Movement, true);
+                return;
+            }
     if (bgStatus == STATUS_IN_PROGRESS && IsFlagCarrier())
     {
         me->AttackStop(); me->SetSelection(ObjectGuid::Empty);
@@ -2229,7 +2241,7 @@ bool BotBGAI::TryUpMount()
 				return false;
 		}
 	}
-	CommandBG* bgCommander = me->GetMap()->GetCommander((isAV||me->GetMapId()==761)?me->GetBGTeamId():me->GetTeamId());
+	CommandBG* bgCommander = me->GetMap()->GetCommander((isAV||me->GetMapId()==761||CommandObjectiveBG::Supports(me->GetBattleground()))?me->GetBGTeamId():me->GetTeamId());
 	if (bgCommander && !bgCommander->CanUpMount(me))
 		return false;
 	if (!me->InArena() && !isAV && !gilneasWaiting)
@@ -3067,6 +3079,10 @@ bool BotBGAI::IsFlagCarrier() const
     if (BattlegroundTwinPeaks* twin = dynamic_cast<BattlegroundTwinPeaks*>(bg))
         return twin->GetFlagPickerGUID(TEAM_ALLIANCE) == me->GetGUID() ||
             twin->GetFlagPickerGUID(TEAM_HORDE) == me->GetGUID();
+    if (CommandObjectiveBG::Supports(bg))
+        if (BattlegroundKotmoguTemplate* temple = dynamic_cast<BattlegroundKotmoguTemplate*>(bg))
+            for (unsigned orb = 0; orb < MAX_ORBS; ++orb)
+                if (temple->GetFlagPickerGUID(orb) == me->GetGUID()) return true;
     if (BattlegroundEyeOfTheStorm* eye = dynamic_cast<BattlegroundEyeOfTheStorm*>(bg))
         return eye->GetFlagPickerGUID() == me->GetGUID();
     return false;
@@ -3170,3 +3186,4 @@ bool BotBGAI::TryGilneasWaitingMount()
     note(result==SPELL_CAST_OK?"mount_cast_started":"native_cast_rejected",unsigned(result));
     return result==SPELL_CAST_OK;
 }
+

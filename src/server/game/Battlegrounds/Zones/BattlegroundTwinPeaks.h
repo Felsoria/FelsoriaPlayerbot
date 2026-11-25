@@ -91,6 +91,8 @@ enum BG_TP_CreatureTypes
 {
     TP_SPIRIT_ALLIANCE = 0,
     TP_SPIRIT_HORDE,
+    TP_SPIRIT_MIDDLE_ALLIANCE,
+    TP_SPIRIT_MIDDLE_HORDE,
 
     BG_CREATURES_MAX_TP
 };
@@ -140,6 +142,8 @@ public:
     void HandleKillPlayer(Player* player, Player* killer) override;
 
     ObjectGuid GetFlagPickerGUID(int32 team) const;
+    uint8 GetFlagState(TeamId team) const { return team < MAX_TEAMS ? _flagState[team] : uint8(BG_TP_FLAG_STATE_WAIT_RESPAWN); }
+    ObjectGuid GetDroppedFlagGUID(TeamId team) const { return team < MAX_TEAMS ? _droppedFlagGUID[team] : ObjectGuid::Empty; }
     void SetAllianceFlagPicker(ObjectGuid const& guid) { _flagKeepers[TEAM_ALLIANCE] = guid; }
     void SetHordeFlagPicker(ObjectGuid const& guid) { _flagKeepers[TEAM_HORDE] = guid; }
     bool IsAllianceFlagPickedup() const { return !_flagKeepers[TEAM_ALLIANCE].IsEmpty(); }
@@ -171,3 +175,4 @@ private:
 };
 
 #endif
+

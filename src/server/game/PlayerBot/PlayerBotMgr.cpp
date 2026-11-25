@@ -473,6 +473,8 @@ PlayerBotMgr::PlayerBotMgr() :
     m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundWarsongGulch);
     m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundArathiBasin);
     m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundBattleForGilneas);
+    m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundTwinPeaks);
+    m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundKotmoguTemplate);
     m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundEyeOfTheStorm);
 #ifndef NON_SINGLE_GAME
     m_BGTypes.push_back(MS::Battlegrounds::BattlegroundTypeId::BattlegroundAlteracValley);
@@ -6129,3 +6131,4 @@ void PlayerBotMgr::Update()
         m_DelayDestroyAIs.erase(*itDel);
     }
 }
+

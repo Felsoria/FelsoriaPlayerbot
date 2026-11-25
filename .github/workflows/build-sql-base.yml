@@ -54,6 +54,9 @@ jobs:
             --updates sql/updates --container "$DB_CONTAINER" --commit "$GITHUB_SHA" \
             --output "$RUNNER_TEMP/felsoria-output/Felsoria-Developer-V2-SQL-${GITHUB_SHA:0:12}.zip"
 
+      - name: Verify Twin Peaks and Kotmogu objective commanders
+        run: python3 .github/scripts/test-bg-objectives.py
+
       - name: Upload the generated SQL package
         uses: actions/upload-artifact@v7.0.2
         with:
@@ -108,3 +111,4 @@ jobs:
           else
             gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
           fi
+

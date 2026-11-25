@@ -198,10 +198,12 @@ Player* CommandBG::GetBGPlayer(uint64 guid)
 
 Position CommandBG::GetNearTeleportPoint(Position& currentPos)
 {
+    if (m_BGKeyWaypoints.empty() || !m_BGKeyWaypoints[0]) return currentPos;
 	AIWaypoint* pNearPoint = m_BGKeyWaypoints[0];
 	float nearDistance = (currentPos.GetVector3() - pNearPoint->GetPosition().GetVector3()).length();
 	for (AIWaypoint* pPoint : m_BGKeyWaypoints)
 	{
+        if (!pPoint) continue;
 		float distance = (currentPos.GetVector3() - pPoint->GetPosition().GetVector3()).length();
 		if (distance < nearDistance)
 		{
@@ -295,3 +297,4 @@ Position CommandBG::GetPositionByGuid(uint64 guid)
 	pos.m_positionX = pos.m_positionY = pos.m_positionZ = 0;
 	return pos;
 }
+

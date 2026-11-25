@@ -79,6 +79,7 @@ public:
 	void MovementTo(float x, float y, float z, float offset = 0);
 	void MovementTo(ObjectGuid guid, float offset = 0);
 	void MovementToTarget();
+    bool MoveObjectiveTo(Position const& goal, float stopRange);
 	void ApplyFinishPath(PathParameter* pathParam);
 	void SyncPosition(Position& pos, bool immed = false);
 	bool CanMovementTo(float x, float y, float z);
@@ -126,6 +127,9 @@ private:
 	void WarnRejectedDynamicPath(Pathfinding const& path, float x, float y, float z);
 
 private:
+    uint32 m_ObjectiveMoveAt = 0, m_ObjectiveInstance = 0;
+    bool m_ObjectiveMoving = false;
+    Position m_ObjectiveGoal;
     bool m_AVSpline=false, m_AVPreparing=false, m_AVRecorded=false, m_AVHasSafeGround=false;
     bool m_AVReadyChosen=false;
     uint32 m_AVReadyInstance=0,m_AVReadyAttempt=0;
@@ -216,3 +220,4 @@ private:
 };
 
 #endif // !_BOT_BGAI_MOVEMENT_H_
+
