@@ -12,7 +12,7 @@ FelsoriaPlayerbot is a further-developed version of [NormalZero's LegionPlayerBo
 - Boost 1.78.0: x64 static libraries built with v143.
 - MySQL Community Server 5.7.44 x64, including its C headers and libraries.
 - OpenSSL 3.5.1 x64, including development headers, libraries, and runtime DLLs.
-- A compatible, patched Legion 7.3.5 client, build **26972**, and matching extracted server data.
+- A compatible Legion 7.3.5 client, build **26972**, and matching extracted server data.
 - Optional: HeidiSQL for importing and managing the databases.
 
 ## Quick installation
