@@ -59,7 +59,9 @@ Find the two servers, four data tools, configuration templates, and matching MyS
 
 ## 2. Import the database package
 
-Use the generated SQL ZIP attached to your release. For a source install from GitHub Actions, download the `felsoria-database` artifact from the successful build for that revision and unpack the outer ZIP. The generated inner ZIP contains four SQL dumps and `database-manifest.json`. Check `source_commit` and `applied_migrations` in the manifest. For a release ZIP or an Actions artifact, use the SHA-256 recorded by the corresponding build. [Releases](https://github.com/Felsoria/felsoria-source/releases) · [SQL builds](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml)
+Use a `developer-v2-<commit>` release and its generated SQL ZIP. After a change is merged into `main`, the SQL and full Windows checks must pass before that source revision and its SQL package are published together. The release includes a `.zip.sha256` file. The older `database-v2-20261121` release is the build baseline; its original clean ZIP alone is not a current installation package.
+
+For a source install from GitHub Actions, download the `felsoria-database` artifact from the successful build for that revision and unpack the outer ZIP. The generated inner ZIP contains four SQL dumps and `database-manifest.json`. Check `source_commit` and `applied_migrations` in the manifest. For an Actions artifact, use the SHA-256 recorded by the corresponding build. [Releases](https://github.com/Felsoria/felsoria-source/releases) · [SQL builds](https://github.com/Felsoria/felsoria-source/actions/workflows/build-sql-base.yml)
 
 Use a dedicated loopback MySQL 5.7.44 instance with a new data directory. Run this from the source checkout in PowerShell, replacing the paths, port and SHA-256 with those of your test installation and the generated inner ZIP. The command reads the source commit from the checkout and prompts for the MySQL password. [MySQL Community Server archives](https://downloads.mysql.com/archives/community/)
 
@@ -81,7 +83,7 @@ Use game data from Legion 7.3.5 build **26972**. If you have a compatible extrac
 
 If you need to extract data, use the tools in this order.
 
-1. Create the data directory and copy `build/developer-v2/src/tools/map_extractor/FelsoriaDB2Files.txt` into it. Run `mapextractor.exe -e 2 -i <client-directory> -o <data-directory> -l enUS`. Pass the game directory containing `Data` and select a locale present in that client. Check the printed `copied`, `missing`, and `failed` totals and `DB2Extraction-<locale>.csv` before using the output. For `enUS`, set `DBC.Locale = 0`.
+1. Create the data directory and copy `build/developer-v2/src/tools/map_extractor/FelsoriaDB2Files.txt` into it. Run `mapextractor.exe -e 2 -i <client-directory> -o <data-directory> -l enUS`. Pass the game directory containing `Data` and select a locale present in that client. A complete extraction exits with code 0. Missing or invalid files return a nonzero exit code; inspect `DB2Extraction-<locale>.csv` and the printed `copied`, `missing`, and `failed` totals. Existing DB2 outputs are preserved, so use a new output directory for a retry. For `enUS`, set `DBC.Locale = 0`.
 2. For terrain and collision data, prepare loose files from the same client with their original paths. Map conversion needs `World/Maps`, `DBFilesClient/Map.db2`, and `DBFilesClient/LiquidType.db2`. Vmap conversion also needs the loose models, `GameObjectDisplayInfo.db2`, and a tool-compatible legacy `FileDataComplete.dbc`.
 3. Run `mapextractor.exe -e 1 -i <unpacked-directory> -o <data-directory>`. In the data directory containing `wmo_list.txt`, run `vmap4extractor.exe -d <unpacked-directory>` and then `vmap4assembler.exe Buildings vmaps`.
 4. From the same data directory, create `mmaps` and run `mmaps_generator.exe`. Supply the required `gt` files from the game data.
@@ -105,6 +107,8 @@ The templates enable the EU Legion virtual realm list and dynamic PlayerBots. Th
 New installations also enable regional guilds and bot chat. Keep the generated `Felsoria/` directory beside `worldserver` when moving the binaries. It contains the two dialogue catalogs. The matching database package supplies 52 guild definitions and the regional dialogue seeds. At startup, look for `FELSORIA_BOT_TEXTS_V3 loaded texts=1511 languages=6` and `REGIONAL_BOTCHAT_INIT` with `ready=1`. Regional guild creation reports `REGIONAL_GUILD_INIT complete=1 guilds=52`.
 
 Existing installations keep their `.conf` files. Apply the missing migrations and copy the virtual realm and PlayerBot settings you want to use from the new templates. Use the same MySQL instance for AUTH and characters. The AUTH database user needs access to the characters table for character-to-realm mapping. If either server reports `FELSORIA_REALM_DATA_INCOMPATIBLE`, update AUTH with the migrations for this source revision or use a matching generated ZIP on a fresh installation.
+
+The Developer V2 gameplay profile sets `DungeonFinder.DebugJoin = 0` for normal role-complete queues and `Battleground.CastDeserter = 0`. Both `ClientCacheVersion` and `HotfixCacheVersion` are `20261110`. The matching SQL migration also raises older database cache revisions without reducing newer ones. Existing configurations with an explicit, older nonzero cache revision must be updated separately; a zero value uses the migrated database revision.
 
 For Battle.net and its HTTPS login form, provide a PEM certificate chain trusted by your Legion client and its matching private key. The repository ships a public TrinityCore certificate chain. Supply a compatible pair for your client and keep the private key local. A self-signed certificate requires explicit trust in the client. Relative paths resolve from the server's working directory.
 
@@ -145,3 +149,4 @@ For a bug report, include the source commit, client build, database snapshot, re
 ## Credits and license
 
 Felsoria builds on LegionPlayerBot, LegionCore, and the work of TrinityCore contributors. See the source headers for copyright and attribution notices. [GNU General Public License](COPYING)
+

@@ -390,8 +390,14 @@ inline int Run(int argc,char** argv)
     std::printf("DB2 %s summary: copied=%u locale-specific=%u missing=%u failed=%u requested=%u\n",
                 locale.c_str(),copied,localized,missing,failed,unsigned(files.size()));
     if(!copied)return 5;
+    if(missing || failed)
+    {
+        std::printf("DB2 extraction incomplete: %u missing, %u failed. See the per-file CSV report.\n",missing,failed);
+        return 6;
+    }
     if(!localized){std::printf("No locale-specific files were available. This locale is not certified.\n");return 7;}
-    return failed?6:0;
+    return 0;
 }
 }
 #endif
+

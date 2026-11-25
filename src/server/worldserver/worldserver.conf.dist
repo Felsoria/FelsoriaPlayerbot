@@ -829,7 +829,8 @@ PlayerStart.AllReputation = 0
 #        Default:     1 - (Enabled)
 #                     0 - (Disabled)
 
-DungeonFinder.DebugJoin = 1
+# Developer V2 uses the normal role-complete queue with PlayerBots.
+DungeonFinder.DebugJoin = 0
 
 #
 #     Bpay.Enabled
@@ -990,7 +991,7 @@ MailDeliveryDelay = 3600
 #                     from DB and not recently been used to trigger client side cache reset.
 #        Default:     0 - (Use DB value from world DB db_version.cache_id field)
 
-ClientCacheVersion = 0
+ClientCacheVersion = 20261110
 
 #
 #    HotfixCacheVersion
@@ -998,7 +999,7 @@ ClientCacheVersion = 0
 #                     from DB and not recently been used to trigger client side cache reset.
 #        Default:     0 - (Use DB value from world DB version.hotfix_id field)
 
-HotfixCacheVersion = 0
+HotfixCacheVersion = 20261110
 
 #
 #    Event.Announce
@@ -1949,7 +1950,7 @@ AutoBroadcast.Timer = 60000
 #        Default:     1 - (Enabled)
 #                     0 - (Disabled)
 
-Battleground.CastDeserter = 1
+Battleground.CastDeserter = 0
 
 #
 #    Battleground.QueueAnnouncer.Enable
@@ -3029,3 +3030,4 @@ LegionForge.DynamicBots.MaxInFlightLogins = 8
 LegionForge.DynamicBots.CreateTimeoutMs = 60000
 LegionForge.DynamicBots.LoginTimeoutMs = 60000
 LegionForge.DynamicBots.Diagnostics.Enable = 0
+
