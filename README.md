@@ -4,8 +4,6 @@
 
 FelsoriaPlayerbot is a further-developed version of [NormalZero's LegionPlayerBot](https://github.com/normalzero/LegionPlayerBot). It adds Felsoria's bot improvements, gameplay fixes, regional guilds, bot chat, and virtual realms for solo and small-group play.
 
-A fresh Windows build, database import, client login, and open-world bots have been tested. The original Developer folder is not required.
-
 ## Required software
 
 - Windows 10/11 x64 and Git.
