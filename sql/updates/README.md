@@ -12,21 +12,29 @@ previous migration so existing installations can apply the correction too.
 
 ## Building a fresh-install archive
 
-The **Build Felsoria SQL base** workflow restores the verified
-`developer-v2-fc893298792a` SQL ZIP into a disposable MySQL 5.7.44 container.
-It checks the baseline's migration IDs and checksums against the source and
-applies only later migrations in revision order. Pull requests targeting `main` run the
-build before merge and include a downloadable Actions artifact. Each update to
-`main` builds the ZIP for its exact source commit. Publishing a release from
-a revision on `main` attaches the generated ZIP to that release. The baseline
-release acts as the input to each new build.
+The **Build Felsoria SQL base** workflow restores the checksum-pinned
+`Felsoria-Developer-V2-SQL-fc893298792a.zip` into a disposable MySQL 5.7.44
+container. The fixed input is retained as an asset of the single **Felsoria V2**
+release (`felsoria-v2`). During the first migration, builds can still download
+it from the old baseline release. Its original SHA-256 is always checked.
 
-After a successful main build publishes its database, automatic releases are
-limited to the pinned baseline above and the newest complete database release
-on main. Superseded automatic SQL packages and their source tags are removed.
-The newest revision is selected by Git ancestry, so an older build finishing
-late cannot replace a newer release. Manual releases, drafts, immutable releases
-and releases with additional uploads are preserved.
+The builder checks the baseline's migration IDs and checksums against the
+source and applies only later migrations in revision order. Pull requests
+run the SQL and Windows checks before merge. Each update to `main`, or a manual
+workflow run on `main`, builds the ZIP for that exact source commit.
+
+After both checks pass, publication updates the same release and moves its
+`felsoria-v2` tag forward. Its title and release URL stay the same. The new ZIP
+and checksum are uploaded and verified before old installation packages are
+removed. The fixed baseline stays in the release. The initial migration also
+removes superseded automatic releases and their source tags; manual releases,
+drafts, immutable releases and custom uploads are preserved.
+
+Publication is serialized. An older build finishing late cannot replace a
+newer source revision. A failed upload leaves the previous installation
+package in place and can be retried. GitHub does not update the tag, assets and
+notes atomically, so installation instructions use the exact source commit in
+the release notes and SQL manifest, rather than relying on a mutable tag.
 
 The ZIP contains the four SQL dumps and `database-manifest.json`, with the
 source commit, baseline checksum, and the IDs and SHA-256 checksums of all
