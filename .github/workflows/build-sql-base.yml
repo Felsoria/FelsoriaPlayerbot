@@ -85,7 +85,7 @@ jobs:
     if: github.event_name == 'release'
     needs: build
     concurrency:
-      group: felsoria-sql-release-${{ github.event.release.id }}
+      group: felsoria-sql-release-publication
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -122,7 +122,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
-      group: felsoria-main-release-${{ github.sha }}
+      group: felsoria-sql-release-publication
       cancel-in-progress: false
     permissions:
       contents: write
@@ -130,6 +130,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@v8.0.2
         with:
           name: felsoria-database
@@ -141,4 +142,4 @@ jobs:
           python3 .github/scripts/publish-sql-release.py
           --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
           --directory "$RUNNER_TEMP/felsoria-output"
-          --retire-legacy-assets
+          --prune-old-releases

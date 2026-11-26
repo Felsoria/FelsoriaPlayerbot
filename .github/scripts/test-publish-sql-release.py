@@ -101,92 +101,204 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(ValueError): publisher.publish("Felsoria/felsoria-source", "main", self.root)
         self.remote.assert_not_called()
 
+class RetentionTests(unittest.TestCase):
+    OLD = "2" * 40
+    MIDDLE = "3" * 40
+    NEW = "4" * 40
+    REPO = "Felsoria/FelsoriaPlayerbot"
 
-class LegacyCleanupTests(unittest.TestCase):
     def setUp(self):
-        self.remote = patch.object(publisher.subprocess, "run").start()
-        self.gh = patch.object(publisher, "gh").start()
+        self.baseline = self.release(publisher.BASELINE_COMMIT, 1)
+        self.baseline["assets"][0]["digest"] = "sha256:" + publisher.BASELINE_SHA256
+        self.old = self.release(self.OLD, 2)
+        self.middle = self.release(self.MIDDLE, 3)
+        self.new = self.release(self.NEW, 4)
+        # API/tag ordering is not chronological.
+        self.releases = [self.baseline, self.new, self.old, self.middle]
+        self.rank = {publisher.BASELINE_COMMIT: 0, self.OLD: 1, self.MIDDLE: 2, self.NEW: 3}
+        self.outside_main = set()
+        self.live = {}
+        self.refs = {}
+        self.pages = None
+        self.deleted = []
+        self.remote = patch.object(publisher, "gh", side_effect=self.reply).start()
+        self.ancestry = patch.object(publisher, "is_ancestor", side_effect=self.ancestor).start()
         self.addCleanup(patch.stopall)
-        self.assets = [
-            {"id": number, "name": name, "digest": "sha256:" + digest}
-            for number, (name, digest) in enumerate(publisher.LEGACY_ASSETS.items(), start=100)
-        ]
-        self.legacy = {"id": 42, "tag_name": publisher.LEGACY_TAG, "assets": self.assets}
-        self.baseline = {
-            "draft": False, "target_commitish": publisher.BASELINE_COMMIT,
-            "assets": [{"name": publisher.BASELINE_ASSET, "digest": "sha256:" + publisher.BASELINE_SHA256}],
+
+    def release(self, commit, number):
+        name = f"Felsoria-Developer-V2-SQL-{commit[:12]}.zip"
+        return {
+            "id": number, "tag_name": f"developer-v2-{commit[:12]}", "target_commitish": commit,
+            "author": {"login": "github-actions[bot]"},
+            "draft": False, "immutable": False, "prerelease": True,
+            "assets": [{"name": filename, "state": "uploaded", "digest": "sha256:" + "a" * 64}
+                       for filename in (name, name + ".sha256")],
         }
-        self.remaining = []
-        self.remote.return_value = subprocess.CompletedProcess([], 0, json.dumps(self.legacy), "")
-        self.gh.side_effect = self.reply
+
+    def ancestor(self, older, newer):
+        if newer == self.NEW and older in self.outside_main:
+            return False
+        return self.rank[older] <= self.rank[newer]
 
     def reply(self, *args):
-        if "--method" in args:
-            return subprocess.CompletedProcess([], 0, "", "")
-        value = self.baseline if args[-1].endswith(publisher.BASELINE_TAG) else {"assets": self.remaining}
-        return subprocess.CompletedProcess([], 0, json.dumps(value), "")
+        if args[:2] == ("release", "delete"):
+            tag = args[2]
+            if tag == publisher.BASELINE_TAG:
+                raise AssertionError("Attempted to delete the pinned baseline")
+            if "--cleanup-tag" not in args:
+                raise AssertionError("An obsolete source tag would be left behind")
+            self.deleted.append(tag)
+            self.releases = [r for r in self.releases if r["tag_name"] != tag]
+            return subprocess.CompletedProcess(args, 0, "", "")
+        endpoint = args[-1]
+        if endpoint.endswith("/git/ref/heads/main"):
+            value = {"object": {"type": "commit", "sha": self.NEW}}
+        elif "/releases?per_page=100&page=" in endpoint:
+            page = int(endpoint.rsplit("&page=", 1)[1])
+            pages = self.pages or [self.releases]
+            value = pages[page - 1] if page <= len(pages) else []
+        elif endpoint.endswith("/releases/tags/" + publisher.BASELINE_TAG):
+            value = self.baseline
+        elif "/git/ref/tags/" in endpoint:
+            tag = endpoint.rsplit("/", 1)[1]
+            release = next(r for r in self.releases if r["tag_name"] == tag)
+            value = {"object": self.refs.get(tag, {
+                "type": "commit", "sha": release["target_commitish"], "url": "https://api.github.com/fixture"
+            })}
+        elif "/releases/" in endpoint:
+            number = int(endpoint.rsplit("/", 1)[1])
+            value = self.live.get(number, next(r for r in self.releases if r["id"] == number))
+        else:
+            raise AssertionError(f"Unexpected API request: {args}")
+        return subprocess.CompletedProcess(args, 0, json.dumps(value), "")
 
-    def deletes(self):
-        return [call.args[-1] for call in self.gh.call_args_list if "--method" in call.args]
+    def prune(self, commit=None):
+        publisher.prune_old_releases(self.REPO, commit or self.NEW)
 
-    def cleanup(self):
-        publisher.retire_legacy_assets("Felsoria/FelsoriaPlayerbot")
+    def test_keeps_baseline_and_newest_and_removes_two_old_tags(self):
+        self.prune()
+        self.assertEqual(set(self.deleted), {self.old["tag_name"], self.middle["tag_name"]})
+        self.assertEqual({r["tag_name"] for r in self.releases},
+                         {publisher.BASELINE_TAG, self.new["tag_name"]})
 
-    def test_only_approved_uploads_and_empty_release_are_deleted(self):
-        self.cleanup()
-        self.assertEqual(self.deletes(), [
-            "repos/Felsoria/FelsoriaPlayerbot/releases/assets/100",
-            "repos/Felsoria/FelsoriaPlayerbot/releases/assets/101",
-            "repos/Felsoria/FelsoriaPlayerbot/releases/42",
-        ])
+    def test_older_build_finishing_late_keeps_the_newer_revision(self):
+        self.prune(self.MIDDLE)
+        self.assertEqual({r["tag_name"] for r in self.releases},
+                         {publisher.BASELINE_TAG, self.new["tag_name"]})
 
-    def test_other_uploads_are_preserved(self):
-        self.remaining = [{"name": "unrelated.txt"}]
-        self.cleanup()
-        self.assertEqual(len(self.deletes()), 2)
-        self.assertTrue(all("/releases/assets/" in path for path in self.deletes()))
-
-    def test_changed_legacy_upload_blocks_all_deletes(self):
-        self.assets[1]["digest"] = "sha256:changed"
-        self.remote.return_value = subprocess.CompletedProcess([], 0, json.dumps(self.legacy), "")
-        with self.assertRaises(ValueError):
-            self.cleanup()
-        self.assertEqual(self.deletes(), [])
-
-    def test_missing_baseline_blocks_all_deletes(self):
-        self.baseline["assets"] = []
-        with self.assertRaises(ValueError):
-            self.cleanup()
-        self.assertEqual(self.deletes(), [])
-
-    def test_changed_baseline_blocks_all_deletes(self):
+    def test_changed_baseline_blocks_all_deletions(self):
         self.baseline["assets"][0]["digest"] = "sha256:changed"
         with self.assertRaises(ValueError):
-            self.cleanup()
-        self.assertEqual(self.deletes(), [])
+            self.prune()
+        self.assertEqual(self.deleted, [])
 
-    def test_wrong_baseline_source_blocks_all_deletes(self):
-        self.baseline["target_commitish"] = "0" * 40
+    def test_missing_current_package_blocks_all_deletions(self):
+        self.releases.remove(self.new)
         with self.assertRaises(ValueError):
-            self.cleanup()
-        self.assertEqual(self.deletes(), [])
+            self.prune()
+        self.assertEqual(self.deleted, [])
 
-    def test_draft_baseline_blocks_all_deletes(self):
-        self.baseline["draft"] = True
+    def test_partial_current_upload_blocks_all_deletions(self):
+        self.new["assets"].pop()
         with self.assertRaises(ValueError):
-            self.cleanup()
-        self.assertEqual(self.deletes(), [])
+            self.prune()
+        self.assertEqual(self.deleted, [])
 
-    def test_cleanup_retry_accepts_missing_legacy_release(self):
-        self.remote.return_value = subprocess.CompletedProcess([], 1, "", "HTTP 404: Not Found")
-        self.cleanup()
-        self.gh.assert_not_called()
+    def test_manual_release_is_preserved(self):
+        self.old["author"]["login"] = "Felsoria"
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
 
-    def test_server_error_never_deletes_anything(self):
-        self.remote.return_value = subprocess.CompletedProcess([], 1, "", "HTTP 503: unavailable")
+    def test_extra_upload_is_preserved(self):
+        self.old["assets"].append({"name": "custom-data.zip"})
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_draft_release_is_preserved(self):
+        self.old["draft"] = True
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_immutable_release_is_preserved(self):
+        self.old["immutable"] = True
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_stable_release_is_preserved(self):
+        self.old["prerelease"] = False
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_partial_old_upload_is_preserved(self):
+        self.old["assets"].pop()
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_release_outside_main_is_preserved(self):
+        self.outside_main.add(self.OLD)
+        self.prune()
+        self.assertNotIn(self.old["tag_name"], self.deleted)
+
+    def test_moved_tag_blocks_all_deletions(self):
+        self.refs[self.middle["tag_name"]] = {"type": "commit", "sha": "f" * 40}
+        with self.assertRaises(ValueError):
+            self.prune()
+        self.assertEqual(self.deleted, [])
+
+    def test_annotated_tag_blocks_all_deletions(self):
+        self.refs[self.old["tag_name"]] = {"type": "tag", "sha": "f" * 40}
+        with self.assertRaises(ValueError):
+            self.prune()
+        self.assertEqual(self.deleted, [])
+
+    def test_edited_release_blocks_all_deletions(self):
+        self.live[self.middle["id"]] = self.release(self.MIDDLE, self.middle["id"])
+        self.live[self.middle["id"]]["assets"][0]["digest"] = "sha256:" + "b" * 64
+        with self.assertRaises(ValueError):
+            self.prune()
+        self.assertEqual(self.deleted, [])
+
+    def test_unknown_git_history_blocks_all_deletions(self):
+        self.ancestry.side_effect = RuntimeError("Missing Git history")
         with self.assertRaises(RuntimeError):
-            self.cleanup()
-        self.gh.assert_not_called()
+            self.prune()
+        self.assertEqual(self.deleted, [])
+
+    def test_all_release_pages_are_checked(self):
+        unrelated = [{"target_commitish": ""} for _ in range(99)]
+        self.pages = [[self.baseline, *unrelated], [self.new, self.old, self.middle]]
+        self.prune()
+        self.assertEqual(len(self.deleted), 2)
+
+    def test_retry_after_cleanup_makes_no_deletions(self):
+        self.prune()
+        self.deleted.clear()
+        self.prune()
+        self.assertEqual(self.deleted, [])
+
+    def test_invalid_commit_never_contacts_github(self):
+        with self.assertRaises(ValueError):
+            self.prune("main")
+        self.remote.assert_not_called()
+
+
+class GitAncestryTests(unittest.TestCase):
+    def test_real_git_history_and_missing_commit(self):
+        import contextlib
+        with tempfile.TemporaryDirectory() as root, contextlib.chdir(root):
+            subprocess.run(["git", "init", "-q"], check=True)
+            def commit():
+                subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                "commit", "--allow-empty", "-qm", "fixture"], check=True)
+                return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            first = commit()
+            second = commit()
+            subprocess.run(["git", "update-ref", "refs/remotes/origin/main", second], check=True)
+            self.assertTrue(publisher.is_ancestor(first, second))
+            self.assertFalse(publisher.is_ancestor(second, first))
+            self.assertTrue(publisher.is_ancestor(second, "origin/main"))
+            with self.assertRaises(RuntimeError):
+                publisher.is_ancestor("f" * 40, second)
 
 
 if __name__ == "__main__":
