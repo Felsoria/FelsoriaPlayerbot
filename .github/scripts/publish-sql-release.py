@@ -85,6 +85,7 @@ def publish(repository, commit, directory):
         gh("release", "upload", tag, str(path), "--repo", repository)
     print(f"Verified release {tag}; existing assets were preserved.")
 
+
 def verify_baseline(repository):
     baseline = json.loads(gh("api", f"repos/{repository}/releases/tags/{BASELINE_TAG}").stdout)
     retained = [item for item in baseline["assets"] if item["name"] == BASELINE_ASSET]
@@ -133,7 +134,13 @@ def prune_old_releases(repository, commit):
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("A complete source commit is required.")
     verify_baseline(repository)
-    if not is_ancestor(commit, "origin/main"):
+    # A checkout for an older run can have a stale origin/main ref. Read the
+    # live head explicitly; the checkout still supplies full local Git history.
+    main = json.loads(gh("api", f"repos/{repository}/git/ref/heads/main").stdout).get("object", {})
+    main_commit = main.get("sha", "")
+    if main.get("type") != "commit" or not re.fullmatch(r"[0-9a-f]{40}", main_commit):
+        raise ValueError("The current main revision could not be verified.")
+    if not is_ancestor(commit, main_commit):
         raise ValueError("The publishing commit is not on main.")
     releases = []
     page = 1
@@ -149,7 +156,7 @@ def prune_old_releases(repository, commit):
         page += 1
     candidates = [release for release in releases
                   if automatic_release(release)
-                  and is_ancestor(release["target_commitish"], "origin/main")]
+                  and is_ancestor(release["target_commitish"], main_commit)]
     current = [release for release in candidates if release["target_commitish"] == commit]
     if len(current) != 1:
         raise ValueError("The matching published database release is not complete.")

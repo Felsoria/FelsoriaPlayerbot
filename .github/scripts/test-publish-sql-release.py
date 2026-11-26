@@ -136,8 +136,8 @@ class RetentionTests(unittest.TestCase):
         }
 
     def ancestor(self, older, newer):
-        if newer == "origin/main":
-            return older not in self.outside_main
+        if newer == self.NEW and older in self.outside_main:
+            return False
         return self.rank[older] <= self.rank[newer]
 
     def reply(self, *args):
@@ -151,7 +151,9 @@ class RetentionTests(unittest.TestCase):
             self.releases = [r for r in self.releases if r["tag_name"] != tag]
             return subprocess.CompletedProcess(args, 0, "", "")
         endpoint = args[-1]
-        if "/releases?per_page=100&page=" in endpoint:
+        if endpoint.endswith("/git/ref/heads/main"):
+            value = {"object": {"type": "commit", "sha": self.NEW}}
+        elif "/releases?per_page=100&page=" in endpoint:
             page = int(endpoint.rsplit("&page=", 1)[1])
             pages = self.pages or [self.releases]
             value = pages[page - 1] if page <= len(pages) else []
