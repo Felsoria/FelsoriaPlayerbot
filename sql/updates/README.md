@@ -21,9 +21,12 @@ build before merge and include a downloadable Actions artifact. Each update to
 a revision on `main` attaches the generated ZIP to that release. The baseline
 release acts as the input to each new build.
 
-The older `database-v2-20261121` archives are retired after a successful
-approved main build publishes its replacement. The pinned baseline above is
-retained so future builds can still reproduce the database.
+After a successful main build publishes its database, automatic releases are
+limited to the pinned baseline above and the newest complete database release
+on main. Superseded automatic SQL packages and their source tags are removed.
+The newest revision is selected by Git ancestry, so an older build finishing
+late cannot replace a newer release. Manual releases, drafts, immutable releases
+and releases with additional uploads are preserved.
 
 The ZIP contains the four SQL dumps and `database-manifest.json`, with the
 source commit, baseline checksum, and the IDs and SHA-256 checksums of all
