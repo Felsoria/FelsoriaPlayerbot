@@ -19,12 +19,14 @@ FelsoriaPlayerbot is a further-developed version of [NormalZero's LegionPlayerBo
 
 ### 1. Build the source
 
-Choose a release from [Releases](https://github.com/Felsoria/FelsoriaPlayerbot/releases), download its SQL ZIP, and use the same release tag for the source. Replace `<release-tag>` below.
+Open the [Felsoria V2 release](https://github.com/Felsoria/FelsoriaPlayerbot/releases), download the installation SQL ZIP, and use its **Matching source ZIP** link. The same release is updated after each successful build. The older SQL ZIP marked as the fixed build input is only needed by the automated build.
+
+For a Git checkout, replace `<source-commit>` below with the full **Source** commit shown in the release notes. It is also recorded in the SQL ZIP's `database-manifest.json`. This keeps your source and database matched even if the release updates while you download.
 
 ```powershell
 git clone https://github.com/Felsoria/FelsoriaPlayerbot.git
 cd FelsoriaPlayerbot
-git checkout <release-tag>
+git checkout <source-commit>
 ```
 
 If Boost is not built yet, open the VS2022 x64 developer shell in its folder, run `bootstrap.bat`, then:
