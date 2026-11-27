@@ -581,17 +581,24 @@ struct boss_fallen_avatar : BossAI
                 });
                 break;
             case SPELL_RUPTURE_REALISTIC_2:
-                for (auto pair : localFloorBlocks)
-                    if (me->GetDistance(pair.second) <= 30.0f)
+                for (auto itr = localFloorBlocks.begin(); itr != localFloorBlocks.end();)
+                {
+                    float const distance = me->GetDistance(itr->second);
+                    if (distance <= 30.0f)
                     {
-                        if (GameObject* go = instance->instance->GetGameObject(instance->GetGuidData(pair.first)))
-                            go->AddDelayedEvent(me->GetDistance(pair.second) * 3 + 1, [go]() -> void
+                        if (GameObject* go = instance->instance->GetGameObject(instance->GetGuidData(itr->first)))
                         {
-                            go->SetDestructibleState(GO_DESTRUCTIBLE_DESTROYED, nullptr, false);
-                        });
+                            go->AddDelayedEvent(distance * 3 + 1, [go]()
+                            {
+                                go->SetDestructibleState(GO_DESTRUCTIBLE_DESTROYED, nullptr, false);
+                            });
+                        }
 
-                        localFloorBlocks.erase(pair.first);
+                        itr = localFloorBlocks.erase(itr);
                     }
+                    else
+                        ++itr;
+                }
                 break;
         }
     }
