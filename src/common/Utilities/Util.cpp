@@ -598,7 +598,7 @@ std::wstring GetMainPartOfName(std::wstring wname, uint32 declension)
     {
         size_t len = size_t((*itr)[-1]);                    // get length from string size field
 
-        if (wname.substr(wname.size() - len, len) == *itr)
+        if (wname.size() >= len && wname.substr(wname.size() - len, len) == *itr)
             return wname.substr(0, wname.size() - len);
     }
 
