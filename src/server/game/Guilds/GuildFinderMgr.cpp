@@ -259,7 +259,7 @@ void GuildFinderMgr::RemoveAllMembershipRequestsFromPlayer(ObjectGuid const& pla
                 break;
 
         if (itr2 == itr.second.end())
-            return;
+            continue;
 
         SQLTransaction trans = CharacterDatabase.BeginTransaction();
 
