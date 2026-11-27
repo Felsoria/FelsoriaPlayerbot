@@ -26,11 +26,11 @@ public:
 
         bool GossipHello(Player* player) override
         {
-            for (int32 i = 0; i < sizeof(q38690); ++i)
+            for (uint32 credit : q38690)
             {
-                if (!player->GetReqKillOrCastCurrentCount(QUEST, q38690[i]))
+                if (!player->GetReqKillOrCastCurrentCount(QUEST, credit))
                 {
-                    player->KilledMonsterCredit(q38690[i]);
+                    player->KilledMonsterCredit(credit);
                     return true;
                 }
             }
