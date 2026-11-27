@@ -55,7 +55,8 @@ std::string const& MembershipRequest::GetName() const
     if (auto const& nameData = sWorld->GetCharacterInfo(_playerGUID))
         return nameData->Name;
 
-    return "";
+    static std::string const emptyName;
+    return emptyName;
 }
 
 uint8 MembershipRequest::GetGender() const
