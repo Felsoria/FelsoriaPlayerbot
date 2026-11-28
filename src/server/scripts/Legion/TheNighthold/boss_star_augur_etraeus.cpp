@@ -187,7 +187,7 @@ struct boss_star_augur_etraeus : BossAI
         })
             .Schedule(Seconds(12), Phase1, [this](TaskContext context)
         {
-            if (ejectionCount > IcyEjectionTime.size())
+            if (ejectionCount >= IcyEjectionTime.size())
                 ejectionCount = 0;
             context.Repeat(Milliseconds(IcyEjectionTime[ejectionCount++]));
             DoCast(me, SpellCoronalEjectionFilter, true);
@@ -240,7 +240,7 @@ struct boss_star_augur_etraeus : BossAI
         })
             .Schedule(Seconds(7), Phase2, [this](TaskContext context)
         {
-            if (ejectionCount > FelEjectionTime.size())
+            if (ejectionCount >= FelEjectionTime.size())
                 ejectionCount = 0;
             context.Repeat(Milliseconds(FelEjectionTime[ejectionCount++]));
             DoCast(me, SpellCoronalEjectionFilter, true);
